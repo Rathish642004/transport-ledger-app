@@ -165,6 +165,16 @@ class _DriverCard extends StatelessWidget {
               Row(
                 children: [
                   InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => context.push('${AppRoutes.driversEdit}?id=${driver.id}'),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(8)),
+                      child: const Icon(Icons.edit_outlined, size: 14, color: Color(0xFF334155)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  InkWell(
                     borderRadius: BorderRadius.circular(10),
                     onTap: () => launchUrl(Uri.parse('tel:${driver.phone}')),
                     child: Container(

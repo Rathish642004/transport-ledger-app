@@ -2,11 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:workmanager/workmanager.dart';
 
 import '../models/backup_sync_state.dart';
+import '../models/bank_account.dart';
 import '../models/company.dart';
 import '../models/customer.dart';
 import '../models/driver.dart';
@@ -23,6 +25,7 @@ import '../storage/hive_boxes.dart' as hive;
 import '../storage/storage_keys.dart';
 import '../utils/formatters.dart';
 import 'all_transactions_provider.dart';
+import 'banks_provider.dart';
 import 'companies_provider.dart';
 import 'customers_provider.dart';
 import 'driver_payments_provider.dart';
@@ -74,6 +77,15 @@ class BackupNotifier extends Notifier<BackupSyncState> {
     state = next;
   }
 
+  String _googleDriveConnectionError(Object error) {
+    if (error is GoogleSignInException && error.code == GoogleSignInExceptionCode.clientConfigurationError) {
+      return 'Google Drive is not configured for this app build. Ask the app '
+          'owner to add a Web OAuth client and the app signing SHA-1, then '
+          'download a new google-services.json.';
+    }
+    return 'Could not connect to Google Drive. Please try again.';
+  }
+
   /// Signs in, authorizes `drive.appdata`, and immediately runs a first
   /// sync — matching the source's one-click "Connect Drive" UX, where
   /// connecting and backing up were literally the same action.
@@ -82,8 +94,33 @@ class BackupNotifier extends Notifier<BackupSyncState> {
       final email = await ref.read(driveBackupClientProvider).connect();
       _commit(state.copyWith(isConnected: true, googleAccount: email));
       await syncNow();
+    } catch (error) {
+      ref.read(toastProvider.notifier).show(
+        _googleDriveConnectionError(error),
+        ToastType.error,
+      );
+    }
+  }
+
+  /// Onboarding's "Connect Google Drive" (`OnboardingScreen`) — like
+  /// [connectGoogleDrive] but doesn't call [syncNow]: there's nothing to
+  /// back up yet since no profile has been entered. Instead it pulls down
+  /// any existing appDataFolder backup (a reinstall or a new device), which
+  /// may restore a profile and skip the manual setup step entirely. Returns
+  /// whether the connection itself succeeded — the caller checks
+  /// `hive.profileBox` afterwards to see whether a restore supplied one.
+  Future<bool> connectForOnboarding() async {
+    try {
+      final client = ref.read(driveBackupClientProvider);
+      final email = await client.connect();
+      _commit(state.copyWith(isConnected: true, googleAccount: email));
+      final backupJson = await client.downloadBackup();
+      if (backupJson != null) {
+        await restoreBackupFromJSON(backupJson);
+      }
+      return true;
     } catch (_) {
-      ref.read(toastProvider.notifier).show('Could not connect to Google Drive. Please try again.', ToastType.error);
+      return false;
     }
   }
 
@@ -207,6 +244,7 @@ class BackupNotifier extends Notifier<BackupSyncState> {
     ref.invalidate(driverPaymentsProvider);
     ref.invalidate(expensesProvider);
     ref.invalidate(profileProvider);
+    ref.invalidate(banksProvider);
   }
 
   /// Returns `true` on success, matching the source's `boolean` return (used
@@ -241,6 +279,7 @@ class BackupNotifier extends Notifier<BackupSyncState> {
       driverPayments: mapList('driverPayments', DriverPaymentRecord.fromJson),
       expenses: mapList('expenses', ExpenseRecord.fromJson),
       profile: parsed['profile'] != null ? TransporterProfile.fromJson(parsed['profile'] as Map<String, dynamic>) : null,
+      banks: mapList('banks', BankAccount.fromJson),
     );
     _invalidateAll();
 
@@ -248,19 +287,6 @@ class BackupNotifier extends Notifier<BackupSyncState> {
     return true;
   }
 
-  Future<void> resetToSampleData() async {
-    try {
-      await ref.read(driveBackupClientProvider).disconnect();
-    } catch (_) {
-      // Best-effort — the reset itself must not fail because of this.
-    }
-    await _scheduleOrCancel(false, state.backupFrequency);
-
-    await hive.resetToSampleData();
-    _invalidateAll();
-    ref.invalidateSelf();
-    ref.read(toastProvider.notifier).show('Reset to original sample data', ToastType.info);
-  }
 }
 
 final backupProvider = NotifierProvider<BackupNotifier, BackupSyncState>(BackupNotifier.new);

@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../models/bank_account.dart';
 import '../models/order.dart';
 import '../models/transporter_profile.dart';
+import '../providers/banks_provider.dart';
 import '../providers/orders_provider.dart';
 import '../providers/profile_provider.dart';
 import '../providers/toast_provider.dart';
 import '../router/app_router.dart';
+import '../services/bill_pdf.dart';
 import '../utils/formatters.dart';
 import '../widgets/delete_order_dialog.dart';
 import '../widgets/order_notes_dialog.dart';
@@ -16,11 +20,13 @@ import '../widgets/status_badge.dart';
 
 /// Ported from `src/screens/BillPreviewScreen.tsx`. The hand-drawn truck SVG
 /// header illustration is replaced with a plain icon — a decorative-only
-/// flourish not worth a custom `CustomPainter` recreation. `Print` shows a
-/// toast rather than actually printing: there's no printing package in the
-/// pinned dependency set, and adding one for a single button is out of scope
-/// here — `Share` (via the already-pinned `share_plus`) covers the same
-/// "get the bill off the phone" need.
+/// flourish not worth a custom `CustomPainter` recreation. `Print` renders
+/// this same bill as a PDF (via `package:pdf`) and hands it to the OS print
+/// framework (via `package:printing`) — new, not in the source (a web
+/// `window.print()` has no native equivalent worth faking with a toast).
+/// The printed bill's bank details come from the first `BankAccount` on
+/// file (see `SettingsScreen`'s doc comment) rather than the old single
+/// profile-level bank fields.
 class BillPreviewScreen extends ConsumerStatefulWidget {
   const BillPreviewScreen({super.key, required this.orderId});
 
@@ -40,6 +46,11 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
       String invoiceDetails, String goodsDescription, int numberOfBags, double ratePerBag, double totalBillAmount,
       String amountInWords) {
     final profile = ref.read(profileProvider);
+    final bank = ref.read(banksProvider).firstOrNull;
+    final bankLines = bank != null
+        ? '*Bank Details:*\nBank: ${bank.bankName} | A/c No: ${bank.accountNumber}\n'
+            'Name: ${bank.accountHolderName} | IFSC: ${bank.ifscCode} | PAN: ${profile.pan}'
+        : '*PAN:* ${profile.pan}';
     final text = '*${profile.businessName}*\n*LR NO:* $lrNumber | *DATE:* $lrDate\n\n'
         '*Consignor (From):*\n$consignorName\n'
         '${(consignorDivision?.isNotEmpty ?? false) ? '$consignorDivision\n' : ''}$consignorAddress\n\n'
@@ -48,11 +59,39 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
         '*Vehicle No:* $vehicleNumber\n*Invoice Details:* $invoiceDetails\n'
         '*Goods:* $goodsDescription\n*Qty:* $numberOfBags BAGS\n*Rate:* ${ratePerBag.round()}/BAG\n'
         '*Amount:* ₹${totalBillAmount.round()} /-\n*Amount in Words:* $amountInWords\n\n'
-        '*Bank Details:*\nBank: ${profile.bankName} | A/c No: ${profile.accountNumber}\n'
-        'Name: ${profile.accountName?.isNotEmpty ?? false ? profile.accountName : profile.ownerName} | '
-        'IFSC: ${profile.ifscCode} | PAN: ${profile.pan}';
+        '$bankLines';
     SharePlus.instance.share(ShareParams(text: text, subject: 'Transport Bill $lrNumber'));
     ref.read(toastProvider.notifier).show('Bill shared successfully');
+  }
+
+  Future<void> _handlePrint(String lrNumber, String lrDate, String consignorName, String? consignorDivision,
+      String consignorAddress, String consigneeName, String consigneeAddress, String deliveryAddress, String vehicleNumber,
+      String invoiceDetails, String goodsDescription, int numberOfBags, double ratePerBag, double totalBillAmount,
+      String amountInWords) async {
+    final profile = ref.read(profileProvider);
+    final bank = ref.read(banksProvider).firstOrNull;
+    await Printing.layoutPdf(
+      name: 'Transport Bill $lrNumber',
+      onLayout: (format) => buildBillPdfBytes(
+        profile: profile,
+        bank: bank,
+        lrNumber: lrNumber,
+        lrDate: lrDate,
+        consignorName: consignorName,
+        consignorDivision: consignorDivision,
+        consignorAddress: consignorAddress,
+        consigneeName: consigneeName,
+        consigneeAddress: consigneeAddress,
+        deliveryAddress: deliveryAddress,
+        vehicleNumber: vehicleNumber,
+        invoiceDetails: invoiceDetails,
+        goodsDescription: goodsDescription,
+        numberOfBags: numberOfBags,
+        ratePerBag: ratePerBag,
+        totalBillAmount: totalBillAmount,
+        amountInWords: amountInWords,
+      ),
+    );
   }
 
   @override
@@ -92,17 +131,17 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
     final lrNumber = (order.lrNumber?.isNotEmpty ?? false) ? order.lrNumber! : order.orderNumber;
     final lrDate = formatLRDate(order.orderDate);
     final consignorName = order.companyName;
-    final consignorDivision = order.consignorDivision ?? 'OE DIVISION,';
+    final consignorDivision = order.consignorDivision ?? '';
     final consignorAddress = order.consignorAddress ?? order.pickupLocation;
     final consigneeName = order.customerName;
-    final consigneeAddress = order.consigneeAddress ?? 'KANKARIA STREET,6Th floor ,Room No ,6\nKOLAKTTA-700071';
-    final deliveryAddress = order.deliveryAddress ?? 'FASHION PROCESS MILL\nMANNARAI, TIRUPPUR-641 607';
+    final consigneeAddress = order.consigneeAddress ?? '';
+    final deliveryAddress = order.deliveryAddress ?? '';
     final vehicleNumber = order.vehicleNumber;
-    final invoiceDetails = order.invoiceDetails ?? 'OYIS/26-27/168';
+    final invoiceDetails = order.invoiceDetails ?? '';
     final goodsDescription = (order.goodsDescription?.isNotEmpty ?? false) ? order.goodsDescription! : order.bagType;
-    final numberOfBags = order.numberOfBags > 0 ? order.numberOfBags : 55;
-    final ratePerBag = order.ratePerBag ?? (order.charges.totalCustomerBill / numberOfBags).roundToDouble();
-    final totalBillAmount = order.charges.totalCustomerBill > 0 ? order.charges.totalCustomerBill : 5500.0;
+    final numberOfBags = order.numberOfBags > 0 ? order.numberOfBags : 0;
+    final ratePerBag = order.ratePerBag ?? (numberOfBags > 0 ? (order.charges.totalCustomerBill / numberOfBags).roundToDouble() : 0);
+    final totalBillAmount = order.charges.totalCustomerBill > 0 ? order.charges.totalCustomerBill : 0.0;
     final amountInWords = numberToWordsINR(totalBillAmount);
     final notesCount = order.notes.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).length;
 
@@ -116,10 +155,14 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
           onShare: () => _handleShare(order!, lrNumber, lrDate, consignorName, consignorDivision, consignorAddress,
               consigneeName, consigneeAddress, deliveryAddress, vehicleNumber, invoiceDetails, goodsDescription,
               numberOfBags, ratePerBag, totalBillAmount, amountInWords),
+          onPrint: () => _handlePrint(lrNumber, lrDate, consignorName, consignorDivision, consignorAddress,
+              consigneeName, consigneeAddress, deliveryAddress, vehicleNumber, invoiceDetails, goodsDescription,
+              numberOfBags, ratePerBag, totalBillAmount, amountInWords),
         ),
         const SizedBox(height: 12),
         _BillDocument(
           profile: profile,
+          bank: ref.watch(banksProvider).firstOrNull,
           lrNumber: lrNumber,
           lrDate: lrDate,
           consignorName: consignorName,
@@ -148,12 +191,13 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
 }
 
 class _Toolbar extends ConsumerWidget {
-  const _Toolbar({required this.order, required this.viewMode, required this.onViewModeChanged, required this.onShare});
+  const _Toolbar({required this.order, required this.viewMode, required this.onViewModeChanged, required this.onShare, required this.onPrint});
 
   final Order order;
   final _ViewMode viewMode;
   final ValueChanged<_ViewMode> onViewModeChanged;
   final VoidCallback onShare;
+  final VoidCallback onPrint;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -166,14 +210,13 @@ class _Toolbar extends ConsumerWidget {
         runSpacing: 8,
         children: [
           OutlinedButton.icon(onPressed: () => context.pop(), icon: const Icon(Icons.arrow_back, size: 14), label: const Text('Back')),
-          SegmentedButton<_ViewMode>(
-            segments: const [
-              ButtonSegment(value: _ViewMode.standard, label: Text('Standard Bill', style: TextStyle(fontSize: 11))),
-              ButtonSegment(value: _ViewMode.detailed, label: Text('Ledger & Profit', style: TextStyle(fontSize: 11))),
-            ],
-            selected: {viewMode},
-            onSelectionChanged: (s) => onViewModeChanged(s.first),
-          ),
+          // Two individually-Wrap-friendly buttons instead of a single
+          // `SegmentedButton`: that widget doesn't shrink or wrap internally,
+          // so on a narrow phone its two longer labels overflowed the
+          // toolbar (a real "RenderFlex overflowed on the right" reported
+          // on-device) — each button here can wrap to its own line instead.
+          _ViewModeButton(label: 'Standard Bill', selected: viewMode == _ViewMode.standard, onTap: () => onViewModeChanged(_ViewMode.standard)),
+          _ViewModeButton(label: 'Ledger & Profit', selected: viewMode == _ViewMode.detailed, onTap: () => onViewModeChanged(_ViewMode.detailed)),
           IconButton(
             tooltip: 'Edit Order Details',
             onPressed: () => context.push(AppRoutes.createOrder, extra: order),
@@ -199,7 +242,7 @@ class _Toolbar extends ConsumerWidget {
           ),
           FilledButton.icon(
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F172A)),
-            onPressed: () => ref.read(toastProvider.notifier).show('Printing isn’t available in this build yet', ToastType.info),
+            onPressed: onPrint,
             icon: const Icon(Icons.print_outlined, size: 14),
             label: const Text('Print'),
           ),
@@ -221,9 +264,35 @@ class _Toolbar extends ConsumerWidget {
   }
 }
 
+class _ViewModeButton extends StatelessWidget {
+  const _ViewModeButton({required this.label, required this.selected, required this.onTap});
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF0369A1) : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? const Color(0xFF0369A1) : const Color(0xFFE2E8F0)),
+        ),
+        child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: selected ? Colors.white : const Color(0xFF334155))),
+      ),
+    );
+  }
+}
+
 class _BillDocument extends StatelessWidget {
   const _BillDocument({
     required this.profile,
+    required this.bank,
     required this.lrNumber,
     required this.lrDate,
     required this.consignorName,
@@ -242,6 +311,7 @@ class _BillDocument extends StatelessWidget {
   });
 
   final TransporterProfile profile;
+  final BankAccount? bank;
   final String lrNumber;
   final String lrDate;
   final String consignorName;
@@ -435,13 +505,12 @@ class _BillDocument extends StatelessWidget {
                   child: Wrap(
                     spacing: 8,
                     children: [
-                      Text.rich(TextSpan(children: [const TextSpan(text: 'Bank: '), TextSpan(text: profile.bankName, style: const TextStyle(fontWeight: FontWeight.bold))]), style: const TextStyle(fontSize: 10)),
-                      Text.rich(TextSpan(children: [const TextSpan(text: 'A/c No: '), TextSpan(text: profile.accountNumber, style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace'))]), style: const TextStyle(fontSize: 10)),
-                      Text.rich(TextSpan(children: [
-                        const TextSpan(text: 'Name: '),
-                        TextSpan(text: (profile.accountName)?.isNotEmpty ?? false ? profile.accountName! : profile.ownerName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      ]), style: const TextStyle(fontSize: 10)),
-                      Text.rich(TextSpan(children: [const TextSpan(text: 'IFSC: '), TextSpan(text: profile.ifscCode, style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace'))]), style: const TextStyle(fontSize: 10)),
+                      if (bank != null) ...[
+                        Text.rich(TextSpan(children: [const TextSpan(text: 'Bank: '), TextSpan(text: bank!.bankName, style: const TextStyle(fontWeight: FontWeight.bold))]), style: const TextStyle(fontSize: 10)),
+                        Text.rich(TextSpan(children: [const TextSpan(text: 'A/c No: '), TextSpan(text: bank!.accountNumber, style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace'))]), style: const TextStyle(fontSize: 10)),
+                        Text.rich(TextSpan(children: [const TextSpan(text: 'Name: '), TextSpan(text: bank!.accountHolderName, style: const TextStyle(fontWeight: FontWeight.bold))]), style: const TextStyle(fontSize: 10)),
+                        Text.rich(TextSpan(children: [const TextSpan(text: 'IFSC: '), TextSpan(text: bank!.ifscCode, style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace'))]), style: const TextStyle(fontSize: 10)),
+                      ],
                       Text.rich(TextSpan(children: [const TextSpan(text: 'PAN: '), TextSpan(text: profile.pan, style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace'))]), style: const TextStyle(fontSize: 10)),
                     ],
                   ),
@@ -490,11 +559,15 @@ class _DetailedLedgerPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
               const Text('Trip Ledger & Margins Breakdown', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   StatusBadge(status: order.paymentStatus.jsonValue, type: StatusBadgeType.payment),
                   const SizedBox(width: 4),
@@ -574,7 +647,14 @@ class _LedgerRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
           Text(value, style: TextStyle(fontSize: bold ? 13 : 11, fontWeight: FontWeight.bold, color: color ?? const Color(0xFF0F172A))),
         ],
       ),
@@ -608,6 +688,7 @@ class _NotesPreviewPanel extends ConsumerWidget {
             children: [
               Row(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
                     width: 36,
@@ -616,25 +697,33 @@ class _NotesPreviewPanel extends ConsumerWidget {
                     child: const Icon(Icons.check_circle, size: 18, color: Color(0xFF059669)),
                   ),
                   const SizedBox(width: 10),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        spacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text('Transport Order #$lrNumber', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-                          StatusBadge(status: order.orderStatus.jsonValue),
-                          StatusBadge(status: order.paymentStatus.jsonValue, type: StatusBadgeType.payment),
-                        ],
-                      ),
-                      Text('$consignorName → $consigneeName (${order.vehicleNumber})', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                    ],
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text('Transport Order #$lrNumber', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+                            StatusBadge(status: order.orderStatus.jsonValue),
+                            StatusBadge(status: order.paymentStatus.jsonValue, type: StatusBadgeType.payment),
+                          ],
+                        ),
+                        Text(
+                          '$consignorName → $consigneeName (${order.vehicleNumber})',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   TextButton.icon(
                     onPressed: () => context.push(AppRoutes.createOrder, extra: order),
@@ -668,7 +757,13 @@ class _NotesPreviewPanel extends ConsumerWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Order Notes & Remarks ($notesCount)', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+                    Expanded(
+                      child: Text(
+                        'Order Notes & Remarks ($notesCount)',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     TextButton(
                       onPressed: () => showOrderNotesDialog(context, ref, order),
                       child: Text(order.notes.isNotEmpty ? 'Manage Notes' : 'Add Note', style: const TextStyle(fontSize: 11)),
@@ -701,4 +796,8 @@ class _NotesPreviewPanel extends ConsumerWidget {
       ),
     );
   }
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

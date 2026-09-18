@@ -47,6 +47,31 @@ void main() {
     expect(find.textContaining('RUPEES', findRichText: true), findsOneWidget); // amount-in-words line
   });
 
+  testWidgets('the toolbar does not overflow on a narrow phone width', (tester) async {
+    // Regression test: the old `SegmentedButton` (Standard Bill / Ledger &
+    // Profit) didn't shrink or wrap, and overflowed the toolbar's `Wrap` on
+    // a real device at ~400 logical px wide — only ever caught because
+    // every other test in this file pumps at a wide 900px. Reproduce at a
+    // realistic narrow width instead.
+    tester.view.physicalSize = const Size(400, 3600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const ProviderScope(child: MyApp()));
+    await tester.pumpAndSettle();
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    (app.routerConfig! as GoRouter).push('/orders/ord-kst-162/bill');
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Ledger & Profit'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('shows "Order record not found" for an unknown id', (tester) async {
     await pumpBillPreview(tester, 'nonexistent-id');
     expect(find.text('Order record not found'), findsOneWidget);

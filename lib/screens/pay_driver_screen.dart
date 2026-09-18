@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +7,7 @@ import '../models/driver.dart';
 import '../models/driver_payment_record.dart';
 import '../models/enums.dart';
 import '../models/order.dart';
+import '../providers/banks_provider.dart';
 import '../providers/driver_payments_provider.dart';
 import '../providers/drivers_provider.dart';
 import '../providers/orders_provider.dart';
@@ -38,6 +37,8 @@ class _PayDriverScreenState extends ConsumerState<PayDriverScreen> {
   late final TextEditingController _referenceCtrl;
   late final TextEditingController _notesCtrl;
   String _billAttachmentName = '';
+  String? _bankAccountId;
+  String? _driverPayoutAccountId;
 
   List<Order> _driverOrders(List<Order> orders, String driverId, String? driverName) {
     return orders
@@ -75,13 +76,15 @@ class _PayDriverScreenState extends ConsumerState<PayDriverScreen> {
     _paymentDate = getTodayDateString();
     _paymentMethod = PaymentMethod.bankTransfer;
     _driverBillNumberCtrl = TextEditingController(
-      text: (currentOrder?.driverExpense.driverBillNumber.isNotEmpty ?? false)
-          ? currentOrder!.driverExpense.driverBillNumber
-          : 'DB-${1000 + Random().nextInt(9000)}',
+      text: (currentOrder?.driverExpense.driverBillNumber.isNotEmpty ?? false) ? currentOrder!.driverExpense.driverBillNumber : '',
     );
     _driverBillDate = getTodayDateString();
-    _referenceCtrl = TextEditingController(text: 'IMPS-${10000000 + Random().nextInt(90000000)}');
+    _referenceCtrl = TextEditingController();
     _notesCtrl = TextEditingController();
+    final banks = ref.read(banksProvider);
+    _bankAccountId = banks.isNotEmpty ? banks.first.id : null;
+    final selectedDriver = drivers.where((d) => d.id == _selectedDriverId).firstOrNull;
+    _driverPayoutAccountId = selectedDriver?.payoutAccounts.firstOrNull?.id;
   }
 
   @override
@@ -93,7 +96,7 @@ class _PayDriverScreenState extends ConsumerState<PayDriverScreen> {
     super.dispose();
   }
 
-  void _handleDriverChange(String driverId, List<Order> orders) {
+  void _handleDriverChange(String driverId, List<Order> orders, List<Driver> drivers) {
     setState(() {
       _selectedDriverId = driverId;
       Order? matched;
@@ -107,6 +110,8 @@ class _PayDriverScreenState extends ConsumerState<PayDriverScreen> {
         _selectedOrderId = matched.id;
         _amountCtrl.text = '${_pendingFreight(matched).round()}';
       }
+      final newDriver = drivers.where((d) => d.id == driverId).firstOrNull;
+      _driverPayoutAccountId = newDriver?.payoutAccounts.firstOrNull?.id;
     });
   }
 
@@ -158,6 +163,8 @@ class _PayDriverScreenState extends ConsumerState<PayDriverScreen> {
             referenceNumber: _referenceCtrl.text,
             notes: _notesCtrl.text,
             billAttachmentName: _billAttachmentName,
+            bankAccountId: _bankAccountId,
+            driverPayoutAccountId: _driverPayoutAccountId,
             recordedAt: '',
           ),
         );
@@ -173,6 +180,7 @@ class _PayDriverScreenState extends ConsumerState<PayDriverScreen> {
   Widget build(BuildContext context) {
     final orders = ref.watch(ordersProvider);
     final drivers = ref.watch(driversProvider);
+    final banks = ref.watch(banksProvider);
     final selectedDriver = drivers.where((d) => d.id == _selectedDriverId).firstOrNull;
     final driverOrders = _driverOrders(orders, _selectedDriverId, selectedDriver?.name);
     final currentOrder = _findOrder(orders, _selectedOrderId);
@@ -257,7 +265,7 @@ class _PayDriverScreenState extends ConsumerState<PayDriverScreen> {
                 decoration: _decoration(),
                 items: [for (final d in drivers) DropdownMenuItem(value: d.id, child: Text('${d.name} • ${d.vehicleNumber} (Due: ${formatINR(d.outstandingAmount)})', overflow: TextOverflow.ellipsis))],
                 onChanged: (v) {
-                  if (v != null) _handleDriverChange(v, orders);
+                  if (v != null) _handleDriverChange(v, orders, drivers);
                 },
               ),
               const SizedBox(height: 10),
@@ -375,6 +383,42 @@ class _PayDriverScreenState extends ConsumerState<PayDriverScreen> {
                     Flexible(child: Text('✓ $_billAttachmentName', style: const TextStyle(color: Color(0xFF047857), fontSize: 11), overflow: TextOverflow.ellipsis)),
                   ],
                 ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const _FieldLabel('Paid From Bank Account'),
+                  TextButton(
+                    onPressed: () => context.push(AppRoutes.banksEdit),
+                    child: const Text('+ Add Bank', style: TextStyle(fontSize: 10)),
+                  ),
+                ],
+              ),
+              DropdownButtonFormField<String?>(
+                isExpanded: true,
+                initialValue: banks.any((b) => b.id == _bankAccountId) ? _bankAccountId : null,
+                decoration: _decoration(),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('-- Not linked to a bank account --', overflow: TextOverflow.ellipsis)),
+                  for (final b in banks)
+                    DropdownMenuItem(value: b.id, child: Text('${b.bankName} • ${b.accountNumber}', overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => setState(() => _bankAccountId = v),
+              ),
+              const SizedBox(height: 10),
+              const _FieldLabel('Paid To (Driver\'s Account)'),
+              DropdownButtonFormField<String?>(
+                key: const Key('driverPayoutAccountDropdown'),
+                isExpanded: true,
+                initialValue: (selectedDriver?.payoutAccounts ?? const []).any((a) => a.id == _driverPayoutAccountId) ? _driverPayoutAccountId : null,
+                decoration: _decoration(),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('-- Not specified --', overflow: TextOverflow.ellipsis)),
+                  for (final a in selectedDriver?.payoutAccounts ?? const [])
+                    DropdownMenuItem(value: a.id, child: Text(a.label, overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => setState(() => _driverPayoutAccountId = v),
               ),
               const SizedBox(height: 10),
               const _FieldLabel('Notes'),

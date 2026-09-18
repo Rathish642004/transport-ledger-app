@@ -19,6 +19,8 @@ class DriverPaymentRecord {
     required this.notes,
     this.billAttachmentName,
     required this.recordedAt,
+    this.bankAccountId,
+    this.driverPayoutAccountId,
   });
 
   final String id;
@@ -37,6 +39,12 @@ class DriverPaymentRecord {
   final String notes;
   final String? billAttachmentName;
   final String recordedAt;
+  /// Which of the transporter's own [BankAccount]s this was paid out from —
+  /// `null` for cash or for records created before this field existed.
+  final String? bankAccountId;
+  /// Which of the driver's own [DriverPayoutAccount]s this was paid into —
+  /// `null` for cash or for records created before this field existed.
+  final String? driverPayoutAccountId;
 
   DriverPaymentRecord copyWith({
     String? id,
@@ -55,6 +63,8 @@ class DriverPaymentRecord {
     String? notes,
     String? billAttachmentName,
     String? recordedAt,
+    String? bankAccountId,
+    String? driverPayoutAccountId,
   }) {
     return DriverPaymentRecord(
       id: id ?? this.id,
@@ -73,6 +83,8 @@ class DriverPaymentRecord {
       notes: notes ?? this.notes,
       billAttachmentName: billAttachmentName ?? this.billAttachmentName,
       recordedAt: recordedAt ?? this.recordedAt,
+      bankAccountId: bankAccountId ?? this.bankAccountId,
+      driverPayoutAccountId: driverPayoutAccountId ?? this.driverPayoutAccountId,
     );
   }
 
@@ -94,6 +106,8 @@ class DriverPaymentRecord {
       notes: json['notes'] as String,
       billAttachmentName: json['billAttachmentName'] as String?,
       recordedAt: json['recordedAt'] as String,
+      bankAccountId: json['bankAccountId'] as String?,
+      driverPayoutAccountId: json['driverPayoutAccountId'] as String?,
     );
   }
 
@@ -114,5 +128,7 @@ class DriverPaymentRecord {
         'notes': notes,
         if (billAttachmentName != null) 'billAttachmentName': billAttachmentName,
         'recordedAt': recordedAt,
+        if (bankAccountId != null) 'bankAccountId': bankAccountId,
+        if (driverPayoutAccountId != null) 'driverPayoutAccountId': driverPayoutAccountId,
       };
 }

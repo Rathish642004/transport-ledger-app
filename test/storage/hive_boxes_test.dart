@@ -10,8 +10,8 @@ import '../test_helpers/hive_test_env.dart';
 
 /// Uses plain `Hive.init` (no Flutter path_provider binding needed) against a
 /// temp directory, then opens boxes under the same [StorageKeys] names the
-/// app uses — so `ordersBox`/`seedIfEmpty`/`resetToSampleData` from
-/// `storage/hive_boxes.dart` work against it exactly as they would at runtime.
+/// app uses — so `ordersBox`/`seedIfEmpty` from `storage/hive_boxes.dart`
+/// work against it exactly as they would at runtime.
 void main() {
   late Directory tempDir;
 
@@ -57,15 +57,4 @@ void main() {
     expect(ordersBox.length, initialOrders.length - 1);
   });
 
-  test('resetToSampleData clears local changes and reseeds from scratch', () async {
-    await seedIfEmpty();
-    await ordersBox.put('extra-order', initialOrders.first.copyWith(id: 'extra-order'));
-    await ordersBox.delete('ord-kst-162');
-
-    await resetToSampleData();
-
-    expect(ordersBox.length, initialOrders.length);
-    expect(ordersBox.containsKey('extra-order'), isFalse);
-    expect(ordersBox.containsKey('ord-kst-162'), isTrue);
-  });
 }

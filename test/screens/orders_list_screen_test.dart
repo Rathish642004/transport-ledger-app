@@ -77,6 +77,54 @@ void main() {
     expect(find.text('KST/27/159'), findsNothing);
   });
 
+  testWidgets('Company filter narrows the list to that company\'s orders', (tester) async {
+    await pumpOrdersList(tester);
+
+    await tester.tap(find.text('All Companies'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('PRABHU SPINNING MILLS PRIVATE LIMITED').last);
+    await tester.pumpAndSettle();
+
+    // comp-1 (PRABHU) is the company on orders 161, 162, and 163.
+    expect(find.text('Showing 3 orders'), findsOneWidget);
+    expect(find.text('KST/27/161'), findsOneWidget);
+    expect(find.text('KST/27/162'), findsOneWidget);
+    expect(find.text('KST/27/163'), findsOneWidget);
+    expect(find.text('KST/27/159'), findsNothing);
+  });
+
+  testWidgets('Customer filter narrows the list to that customer\'s orders', (tester) async {
+    await pumpOrdersList(tester);
+
+    await tester.tap(find.text('All Customers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ECO JUTE P LTD').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Showing 2 orders'), findsOneWidget);
+    expect(find.text('KST/27/162'), findsOneWidget);
+    expect(find.text('KST/27/163'), findsOneWidget);
+  });
+
+  testWidgets('the export menu offers PDF and Excel options', (tester) async {
+    await pumpOrdersList(tester);
+
+    await tester.tap(find.byIcon(Icons.ios_share));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Export as PDF'), findsOneWidget);
+    expect(find.text('Export as Excel (CSV)'), findsOneWidget);
+  });
+
+  testWidgets('tapping Filter by Date opens the date range picker', (tester) async {
+    await pumpOrdersList(tester);
+
+    await tester.tap(find.text('Filter by Date'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Save'), findsOneWidget); // the date range picker's confirm action
+  });
+
   testWidgets('delete dialog removes the order after confirming', (tester) async {
     await pumpOrdersList(tester);
 

@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import '../models/company.dart';
 import '../providers/companies_provider.dart';
 import '../providers/toast_provider.dart';
-import '../router/app_router.dart';
 
 /// Ported from `src/screens/PartiesScreens.tsx`'s `AddEditCompanyModal`.
 ///
@@ -82,7 +81,7 @@ class _AddEditCompanyScreenState extends ConsumerState<AddEditCompanyScreen> {
           gstin: _gstinCtrl.text.toUpperCase(),
         );
 
-    context.go(AppRoutes.companies);
+    context.pop();
   }
 
   @override

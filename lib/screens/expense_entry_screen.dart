@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../models/enums.dart';
 import '../models/expense_record.dart';
+import '../providers/banks_provider.dart';
 import '../providers/drivers_provider.dart';
 import '../providers/expenses_provider.dart';
 import '../providers/orders_provider.dart';
@@ -54,17 +55,18 @@ class _ExpenseEntryScreenState extends ConsumerState<ExpenseEntryScreen> {
   PaymentMethod _paymentMethod = PaymentMethod.cash;
   late final TextEditingController _descriptionCtrl;
   String _receiptAttachment = '';
+  String? _bankAccountId;
 
   @override
   void initState() {
     super.initState();
     final drivers = ref.read(driversProvider);
-    _amountCtrl = TextEditingController(text: '1500');
+    _amountCtrl = TextEditingController();
     _expenseDate = getTodayDateString();
     _selectedOrderId = widget.orderId ?? '';
-    _vehicleNumberCtrl = TextEditingController(text: 'MH-04-GP-8841');
+    _vehicleNumberCtrl = TextEditingController();
     _driverId = drivers.isNotEmpty ? drivers.first.id : '';
-    _descriptionCtrl = TextEditingController(text: 'Hamali paid to 4 labourers for unloading 500 bags');
+    _descriptionCtrl = TextEditingController();
   }
 
   @override
@@ -115,6 +117,7 @@ class _ExpenseEntryScreenState extends ConsumerState<ExpenseEntryScreen> {
             paymentMethod: _paymentMethod,
             notes: _descriptionCtrl.text,
             receiptAttachmentName: _receiptAttachment.isNotEmpty ? _receiptAttachment : null,
+            bankAccountId: _bankAccountId,
           ),
         );
 
@@ -129,6 +132,7 @@ class _ExpenseEntryScreenState extends ConsumerState<ExpenseEntryScreen> {
   Widget build(BuildContext context) {
     final orders = ref.watch(ordersProvider);
     final drivers = ref.watch(driversProvider);
+    final banks = ref.watch(banksProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -269,6 +273,28 @@ class _ExpenseEntryScreenState extends ConsumerState<ExpenseEntryScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const _FieldLabel('Paid From Bank Account'),
+                  TextButton(
+                    onPressed: () => context.push(AppRoutes.banksEdit),
+                    child: const Text('+ Add Bank', style: TextStyle(fontSize: 10)),
+                  ),
+                ],
+              ),
+              DropdownButtonFormField<String?>(
+                isExpanded: true,
+                initialValue: banks.any((b) => b.id == _bankAccountId) ? _bankAccountId : null,
+                decoration: _decoration(),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('-- Cash / Not linked --', overflow: TextOverflow.ellipsis)),
+                  for (final b in banks)
+                    DropdownMenuItem(value: b.id, child: Text('${b.bankName} • ${b.accountNumber}', overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => setState(() => _bankAccountId = v),
               ),
               const SizedBox(height: 10),
               const _FieldLabel('Description / Remarks'),

@@ -96,6 +96,33 @@ void main() {
     await tester.pump(const Duration(seconds: 4)); // flush saveDriver's toast timer
   });
 
+  testWidgets('editing an existing driver shows Payment Accounts, and adding/removing one works', (tester) async {
+    await pumpDrivers(tester);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit Driver'), findsOneWidget);
+    expect(find.text('Payment Accounts'), findsOneWidget);
+    expect(find.text('No payment accounts added yet.'), findsOneWidget);
+
+    await tester.enterText(find.widgetWithText(TextField, 'UPI ID, e.g. driver@ybl'), 'selvaraj@ybl');
+    await tester.tap(find.text('Add Payment Account'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('selvaraj@ybl'), findsOneWidget);
+    expect(driversBox.get('drv-1')!.payoutAccounts, hasLength(1));
+
+    await tester.pump(const Duration(seconds: 4)); // let the "added" toast (with its own close icon) clear first
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No payment accounts added yet.'), findsOneWidget);
+    expect(driversBox.get('drv-1')!.payoutAccounts, isEmpty);
+
+    await tester.pump(const Duration(seconds: 4)); // flush the add/remove toast timers
+  });
+
   testWidgets('validation blocks an empty vehicle number with a warning toast', (tester) async {
     await pumpDrivers(tester);
 

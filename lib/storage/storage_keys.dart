@@ -14,6 +14,7 @@ class StorageKeys {
   static const expenses = 'tl_expenses_v2';
   static const profile = 'tl_profile_v2';
   static const backup = 'tl_backup_v2';
+  static const banks = 'tl_banks_v2';
 
   /// Companion `Box<List>` order-index for [orders]/[payments] — see
   /// `OrderedBoxIndex`. Only these two need it: Dashboard slices their raw
@@ -37,6 +38,7 @@ class StorageKeys {
     expenses,
     profile,
     backup,
+    banks,
     ordersOrder,
     paymentsOrder,
   ];

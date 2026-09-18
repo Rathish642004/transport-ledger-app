@@ -195,17 +195,4 @@ void main() {
     expect(container.read(toastProvider).last.message, 'Failed to parse backup JSON file');
   });
 
-  test('resetToSampleData restores the 5 seed orders after a restore wiped them down to 1', () async {
-    await container.read(backupProvider.notifier).restoreBackupFromJSON(jsonEncode({
-          'orders': [ordersBox.values.first.toJson()],
-        }));
-    expect(container.read(ordersProvider).length, 1);
-
-    await container.read(backupProvider.notifier).resetToSampleData();
-
-    expect(container.read(ordersProvider).length, 5);
-    expect(container.read(toastProvider).last.message, 'Reset to original sample data');
-    // Reset also honestly disconnects Drive — see `initialBackupSettings`'s doc comment.
-    expect(container.read(backupProvider).isConnected, isFalse);
-  });
 }

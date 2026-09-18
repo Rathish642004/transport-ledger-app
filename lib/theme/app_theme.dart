@@ -20,6 +20,24 @@ final appTheme = ThemeData(
   useMaterial3: true,
   colorScheme: ColorScheme.fromSeed(seedColor: AppColors.skyPrimary),
   scaffoldBackgroundColor: AppColors.slate50,
+  // Every screen's `TextField`s are built with a local `_decoration()`-style
+  // helper that sets padding/border but never a `style:` — so with no
+  // override here, the actual typed/hint text fell back to Material 3's
+  // default `textTheme.bodyLarge` (16px), visibly larger than the 11-12px
+  // labels and hints surrounding it everywhere in the app (and, since field
+  // height follows text height, made every field noticeably taller too).
+  // Overriding just this one slot fixes every such field app-wide; explicit
+  // per-field `style:` overrides (e.g. the bold 18px amount fields) are
+  // untouched since they always take precedence over the theme default.
+  //
+  // `DropdownButton`/`DropdownButtonFormField` (every "select" field —
+  // company/customer/driver/payment method/etc.) don't read `bodyLarge` at
+  // all; they default to `titleMedium`, which was still at Material 3's
+  // ~16px default, so selected values/menu items stayed visibly larger than
+  // every plain text field around them. No `ListTile` (the other common
+  // implicit consumer of `titleMedium`) exists anywhere in this app, so this
+  // is safe to override the same way.
+  textTheme: const TextTheme(bodyLarge: TextStyle(fontSize: 13), titleMedium: TextStyle(fontSize: 13)),
   cardTheme: const CardThemeData(
     elevation: 1,
     margin: EdgeInsets.zero,

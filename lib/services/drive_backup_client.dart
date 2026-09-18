@@ -41,12 +41,21 @@ class GoogleDriveBackupClient implements DriveBackupClient {
   static const _scope = 'https://www.googleapis.com/auth/drive.appdata';
   static const _fileName = 'transport_ledger_backup.json';
 
+  /// The `transport-ledger-c3580` project's Web application OAuth client
+  /// (Google Cloud Console → APIs & Services → Credentials). `google_sign_in`
+  /// on Android requires this as `serverClientId` even though this app has no
+  /// backend of its own — without it, `initialize()` throws
+  /// `GoogleSignInExceptionCode.clientConfigurationError` before the account
+  /// picker ever shows. Only the client ID is needed here, never its secret
+  /// (that's for server-side token exchange, which a mobile app never does).
+  static const _serverClientId = '58406145532-tgb7kt7t5m869code8hosm3acneqf97s.apps.googleusercontent.com';
+
   GoogleSignInAccount? _account;
   bool _initialized = false;
 
   Future<void> _ensureInitialized() async {
     if (_initialized) return;
-    await GoogleSignIn.instance.initialize();
+    await GoogleSignIn.instance.initialize(serverClientId: _serverClientId);
     _initialized = true;
   }
 

@@ -17,6 +17,7 @@ class PaymentReceipt {
     required this.referenceNumber,
     required this.notes,
     required this.recordedAt,
+    this.bankAccountId,
   });
 
   final String id;
@@ -33,6 +34,9 @@ class PaymentReceipt {
   final String referenceNumber;
   final String notes;
   final String recordedAt;
+  /// Which of the transporter's own [BankAccount]s this was received into —
+  /// `null` for cash or for records created before this field existed.
+  final String? bankAccountId;
 
   PaymentReceipt copyWith({
     String? id,
@@ -49,6 +53,7 @@ class PaymentReceipt {
     String? referenceNumber,
     String? notes,
     String? recordedAt,
+    String? bankAccountId,
   }) {
     return PaymentReceipt(
       id: id ?? this.id,
@@ -65,6 +70,7 @@ class PaymentReceipt {
       referenceNumber: referenceNumber ?? this.referenceNumber,
       notes: notes ?? this.notes,
       recordedAt: recordedAt ?? this.recordedAt,
+      bankAccountId: bankAccountId ?? this.bankAccountId,
     );
   }
 
@@ -84,6 +90,7 @@ class PaymentReceipt {
       referenceNumber: json['referenceNumber'] as String,
       notes: json['notes'] as String,
       recordedAt: json['recordedAt'] as String,
+      bankAccountId: json['bankAccountId'] as String?,
     );
   }
 
@@ -102,5 +109,6 @@ class PaymentReceipt {
         'referenceNumber': referenceNumber,
         'notes': notes,
         'recordedAt': recordedAt,
+        if (bankAccountId != null) 'bankAccountId': bankAccountId,
       };
 }

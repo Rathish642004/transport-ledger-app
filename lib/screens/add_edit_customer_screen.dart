@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import '../models/customer.dart';
 import '../providers/customers_provider.dart';
 import '../providers/toast_provider.dart';
-import '../router/app_router.dart';
 
 /// Ported from `src/screens/PartiesScreens.tsx`'s `AddEditCustomerModal`.
 class AddEditCustomerScreen extends ConsumerStatefulWidget {
@@ -76,7 +75,7 @@ class _AddEditCustomerScreenState extends ConsumerState<AddEditCustomerScreen> {
           gstin: _gstinCtrl.text.toUpperCase(),
         );
 
-    context.go(AppRoutes.customers);
+    context.pop();
   }
 
   @override

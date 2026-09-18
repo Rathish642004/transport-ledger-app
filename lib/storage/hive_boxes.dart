@@ -2,6 +2,7 @@ import 'package:hive_ce_flutter/hive_ce_flutter.dart';
 
 import '../data/seed_data.dart';
 import '../models/backup_sync_state.dart';
+import '../models/bank_account.dart';
 import '../models/company.dart';
 import '../models/customer.dart';
 import '../models/driver.dart';
@@ -34,11 +35,29 @@ Future<void> initHive() async {
     Hive.openBox<ExpenseRecord>(StorageKeys.expenses),
     Hive.openBox<TransporterProfile>(StorageKeys.profile),
     Hive.openBox<BackupSyncState>(StorageKeys.backup),
+    Hive.openBox<BankAccount>(StorageKeys.banks),
     Hive.openBox<List>(StorageKeys.ordersOrder),
     Hive.openBox<List>(StorageKeys.paymentsOrder),
   ]);
 
-  await seedIfEmpty();
+  // `backupSettings` isn't user data — the app reads it as non-null
+  // (`BackupNotifier.build`) and it's just sync bookkeeping, so it must exist
+  // from the first run regardless of onboarding/sample data. `profile` is
+  // deliberately NOT seeded here: an empty `profileBox` is what the router
+  // (`app_router.dart`) uses to decide whether to show onboarding, which is
+  // where a real profile gets created (typed in, or restored from Drive).
+  if (backupBox.isEmpty) {
+    await backupBox.put(StorageKeys.singleValueKey, initialBackupSettings);
+  }
+
+  // Build with `--dart-define=SEED_SAMPLE_DATA=false` for client-facing
+  // releases that should start with no sample orders/companies/etc.; dev/test
+  // builds keep them for a ready-to-use first run. `seedIfEmpty` itself stays
+  // available either way — it also backs "Restore Default Sample Data" in
+  // Settings.
+  if (const bool.fromEnvironment('SEED_SAMPLE_DATA', defaultValue: true)) {
+    await seedIfEmpty();
+  }
 }
 
 /// First-launch seeding, and the "Reset to Sample Data" action in Settings.
@@ -86,6 +105,7 @@ Future<void> replaceAllFromBackup({
   List<DriverPaymentRecord>? driverPayments,
   List<ExpenseRecord>? expenses,
   TransporterProfile? profile,
+  List<BankAccount>? banks,
 }) async {
   await ordersOrderedIndex.clear();
   ordersOrderedIndex.write(orders);
@@ -117,22 +137,10 @@ Future<void> replaceAllFromBackup({
   if (profile != null) {
     await profileBox.put(StorageKeys.singleValueKey, profile);
   }
-}
-
-/// Clears all boxes and re-seeds from [seedIfEmpty] — "Reset to Sample Data".
-Future<void> resetToSampleData() async {
-  await Future.wait([
-    ordersOrderedIndex.clear(),
-    companiesBox.clear(),
-    customersBox.clear(),
-    driversBox.clear(),
-    paymentsOrderedIndex.clear(),
-    driverPaymentsBox.clear(),
-    expensesBox.clear(),
-    profileBox.clear(),
-    backupBox.clear(),
-  ]);
-  await seedIfEmpty();
+  if (banks != null) {
+    await banksBox.clear();
+    await banksBox.putAll({for (final b in banks) b.id: b});
+  }
 }
 
 Box<Order> get ordersBox => Hive.box<Order>(StorageKeys.orders);
@@ -145,6 +153,7 @@ Box<DriverPaymentRecord> get driverPaymentsBox =>
 Box<ExpenseRecord> get expensesBox => Hive.box<ExpenseRecord>(StorageKeys.expenses);
 Box<TransporterProfile> get profileBox => Hive.box<TransporterProfile>(StorageKeys.profile);
 Box<BackupSyncState> get backupBox => Hive.box<BackupSyncState>(StorageKeys.backup);
+Box<BankAccount> get banksBox => Hive.box<BankAccount>(StorageKeys.banks);
 
 Box<List> get ordersOrderBox => Hive.box<List>(StorageKeys.ordersOrder);
 Box<List> get paymentsOrderBox => Hive.box<List>(StorageKeys.paymentsOrder);
@@ -183,6 +192,7 @@ Map<String, dynamic> buildBackupPayload() => {
       'payments': paymentsOrderedIndex.read().map((p) => p.toJson()).toList(),
       'driverPayments': driverPaymentsBox.values.map((p) => p.toJson()).toList(),
       'expenses': expensesBox.values.map((e) => e.toJson()).toList(),
+      'banks': banksBox.values.map((b) => b.toJson()).toList(),
     };
 
 /// `orders.length + payments.length + driverPayments.length +

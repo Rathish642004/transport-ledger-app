@@ -54,6 +54,54 @@ class DriverPaymentsNotifier extends Notifier<List<DriverPaymentRecord>> {
         );
     return newVoucher;
   }
+
+  /// Applies (`sign: 1`) or reverses (`sign: -1`) a voucher's effect on its
+  /// order and driver — see `PaymentsNotifier._applyEffect`'s doc comment
+  /// for why negating the original amount is enough on its own.
+  void _applyEffect(DriverPaymentRecord payment, double sign) {
+    ref.read(ordersProvider.notifier).applyDriverPayment(
+          orderId: payment.orderId,
+          orderNumber: payment.orderNumber,
+          amountPaid: sign * payment.amountPaid,
+          driverBillNumber: payment.driverBillNumber,
+          driverBillDate: payment.driverBillDate,
+          billAttachmentName: payment.billAttachmentName,
+        );
+    ref.read(driversProvider.notifier).applyDriverPayment(
+          driverId: payment.driverId,
+          driverName: payment.driverName,
+          amountPaid: sign * payment.amountPaid,
+        );
+  }
+
+  /// Undoes a driver payment recorded by mistake — not in the source, which
+  /// has no way to remove a voucher at all.
+  void removeDriverPayment(String id) {
+    final payment = state.where((p) => p.id == id).firstOrNull;
+    if (payment == null) return;
+
+    _applyEffect(payment, -1);
+    // Not `_commit`, which only ever `put`s — never removes the stale entry
+    // from the box (see `BanksNotifier.deleteBankAccount`'s same reasoning).
+    driverPaymentsBox.delete(id);
+    state = state.where((p) => p.id != id).toList();
+    ref.read(toastProvider.notifier).show('Driver payment removed', ToastType.info);
+  }
+
+  /// Edits an existing voucher in place — see `PaymentsNotifier.updatePayment`.
+  void updateDriverPayment(DriverPaymentRecord updated) {
+    final old = state.where((p) => p.id == updated.id).firstOrNull;
+    if (old == null) return;
+
+    _applyEffect(old, -1);
+    _commit([for (final p in state) if (p.id == updated.id) updated else p]);
+    _applyEffect(updated, 1);
+    ref.read(toastProvider.notifier).show('Driver payment updated');
+  }
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }
 
 final driverPaymentsProvider =

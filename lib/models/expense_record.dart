@@ -15,6 +15,7 @@ class ExpenseRecord {
     required this.paymentMethod,
     required this.notes,
     this.receiptAttachmentName,
+    this.bankAccountId,
   });
 
   final String id;
@@ -29,6 +30,9 @@ class ExpenseRecord {
   final PaymentMethod paymentMethod;
   final String notes;
   final String? receiptAttachmentName;
+  /// Which of the transporter's own [BankAccount]s this was paid from —
+  /// `null` for cash or for records created before this field existed.
+  final String? bankAccountId;
 
   ExpenseRecord copyWith({
     String? id,
@@ -43,6 +47,7 @@ class ExpenseRecord {
     PaymentMethod? paymentMethod,
     String? notes,
     String? receiptAttachmentName,
+    String? bankAccountId,
   }) {
     return ExpenseRecord(
       id: id ?? this.id,
@@ -57,6 +62,7 @@ class ExpenseRecord {
       paymentMethod: paymentMethod ?? this.paymentMethod,
       notes: notes ?? this.notes,
       receiptAttachmentName: receiptAttachmentName ?? this.receiptAttachmentName,
+      bankAccountId: bankAccountId ?? this.bankAccountId,
     );
   }
 
@@ -74,6 +80,7 @@ class ExpenseRecord {
       paymentMethod: PaymentMethod.fromJson(json['paymentMethod'] as String),
       notes: json['notes'] as String,
       receiptAttachmentName: json['receiptAttachmentName'] as String?,
+      bankAccountId: json['bankAccountId'] as String?,
     );
   }
 
@@ -90,5 +97,6 @@ class ExpenseRecord {
         'paymentMethod': paymentMethod.toJson(),
         'notes': notes,
         if (receiptAttachmentName != null) 'receiptAttachmentName': receiptAttachmentName,
+        if (bankAccountId != null) 'bankAccountId': bankAccountId,
       };
 }

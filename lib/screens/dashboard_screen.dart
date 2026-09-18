@@ -6,6 +6,7 @@ import '../models/ledger_metrics.dart';
 import '../models/order.dart';
 import '../models/payment_receipt.dart';
 import '../models/transporter_profile.dart';
+import '../providers/backup_provider.dart';
 import '../providers/filters_provider.dart';
 import '../providers/metrics_provider.dart';
 import '../providers/orders_provider.dart';
@@ -25,6 +26,7 @@ class DashboardScreen extends ConsumerWidget {
     final orders = ref.watch(ordersProvider);
     final payments = ref.watch(paymentsProvider);
     final profile = ref.watch(profileProvider);
+    final backup = ref.watch(backupProvider);
     final selectedFy = ref.watch(selectedFinancialYearProvider);
     final selectedMonth = ref.watch(selectedMonthProvider);
 
@@ -44,6 +46,10 @@ class DashboardScreen extends ConsumerWidget {
         if (metrics.overdueBillsCount > 0) ...[
           const SizedBox(height: 16),
           _OverdueBanner(count: metrics.overdueBillsCount),
+        ],
+        if (!backup.isConnected) ...[
+          const SizedBox(height: 16),
+          const _BackupReminderBanner(),
         ],
         const SizedBox(height: 16),
         _NetProfitCard(metrics: metrics, selectedFy: selectedFy, selectedMonth: selectedMonth),
@@ -67,7 +73,7 @@ class DashboardScreen extends ConsumerWidget {
                 dotColor: const Color(0xFFE11D48),
                 value: formatINR(metrics.driverPayables),
                 subtitle: 'Freight dues across truck drivers',
-                onTap: () => context.push(AppRoutes.drivers),
+                onTap: () => context.push('${AppRoutes.ledger}?tab=drivers'),
               ),
             ),
           ],
@@ -257,6 +263,58 @@ class _OverdueBanner extends StatelessWidget {
   }
 }
 
+/// Nudges users who haven't connected Google Drive backup — all ledger data
+/// otherwise lives only in this app's local storage and is permanently lost
+/// on uninstall. Deliberately shown on every dashboard visit until connected
+/// (no dismiss/snooze), same as [_OverdueBanner], since silent data loss is
+/// a worse outcome than a persistent reminder.
+class _BackupReminderBanner extends StatelessWidget {
+  const _BackupReminderBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => context.push(AppRoutes.settings),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFBEB),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFFDE68A)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(10)),
+              child: const Icon(Icons.cloud_off_outlined, size: 16, color: Color(0xFFB45309)),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Your data isn\'t backed up',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                  ),
+                  Text(
+                    'Orders & payments are stored only on this device. Connect Google Drive so uninstalling doesn\'t erase them.',
+                    style: TextStyle(fontSize: 11, color: Color(0xFFB45309)),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, size: 18, color: Color(0xFFFCD34D)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _NetProfitCard extends StatelessWidget {
   const _NetProfitCard({required this.metrics, required this.selectedFy, required this.selectedMonth});
 
@@ -350,11 +408,12 @@ class _NetProfitCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Profit Trend (Last 6 Months)', style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
-              Text('Growing Steady', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF34D399))),
+              const Flexible(child: Text('Profit Trend (Last 6 Months)', style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8)), overflow: TextOverflow.ellipsis)),
+              const SizedBox(width: 6),
+              const Text('Growing Steady', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF34D399))),
             ],
           ),
           const SizedBox(height: 8),
@@ -648,15 +707,20 @@ class _RecentOrdersCard extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(
-                  children: [
-                    Icon(Icons.receipt_long, size: 16, color: Color(0xFF0369A1)),
-                    SizedBox(width: 8),
-                    Text(
-                      'RECENT TRANSPORT ORDERS',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-                    ),
-                  ],
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.receipt_long, size: 16, color: Color(0xFF0369A1)),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'RECENT TRANSPORT ORDERS',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 TextButton(
                   onPressed: () => context.push(AppRoutes.orders),
@@ -684,9 +748,12 @@ class _RecentOrdersCard extends StatelessWidget {
                             children: [
                               Row(
                                 children: [
-                                  Text(
-                                    order.orderNumber,
-                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+                                  Flexible(
+                                    child: Text(
+                                      order.orderNumber,
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
                                   const SizedBox(width: 6),
                                   StatusBadge(status: order.orderStatus.jsonValue),
@@ -761,15 +828,20 @@ class _RecentPaymentsCard extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(
-                  children: [
-                    Icon(Icons.account_balance_wallet, size: 16, color: Color(0xFF059669)),
-                    SizedBox(width: 8),
-                    Text(
-                      'RECENT CASH COLLECTIONS',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-                    ),
-                  ],
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.account_balance_wallet, size: 16, color: Color(0xFF059669)),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'RECENT CASH COLLECTIONS',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 TextButton(
                   onPressed: () => context.push(AppRoutes.ledger),

@@ -93,4 +93,45 @@ void main() {
 
     expect(find.text('Record Customer Payment'), findsOneWidget);
   });
+
+  testWidgets('the "Add" button sits above the tabs and opens the right add form per tab', (tester) async {
+    await pumpLedger(tester);
+
+    expect(find.text('Add Company'), findsOneWidget);
+    await tester.tap(find.text('Add Company'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add New Company'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.arrow_back));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Drivers'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add Driver'), findsOneWidget);
+
+    await tester.tap(find.text('Cash Book'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add Driver'), findsNothing); // no add action on the Cash Book tab
+  });
+
+  testWidgets('the edit icon on a Company row opens that company for editing', (tester) async {
+    await pumpLedger(tester);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit Company'), findsOneWidget);
+    expect(find.text('PRABHU SPINNING MILLS PRIVATE LIMITED'), findsOneWidget); // pre-filled name field
+  });
+
+  testWidgets('the edit icon on a Driver row opens that driver for editing', (tester) async {
+    await pumpLedger(tester);
+
+    await tester.tap(find.text('Drivers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.edit_outlined).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit Driver'), findsOneWidget);
+    expect(find.text('Payment Accounts'), findsOneWidget);
+  });
 }

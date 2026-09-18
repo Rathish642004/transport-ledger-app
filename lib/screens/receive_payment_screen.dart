@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,12 +5,14 @@ import 'package:go_router/go_router.dart';
 import '../models/enums.dart';
 import '../models/order.dart';
 import '../models/payment_receipt.dart';
+import '../providers/banks_provider.dart';
 import '../providers/companies_provider.dart';
 import '../providers/orders_provider.dart';
 import '../providers/payments_provider.dart';
 import '../providers/toast_provider.dart';
 import '../router/app_router.dart';
 import '../utils/formatters.dart';
+import '../widgets/confirmation_dialog.dart';
 
 /// Ported from `src/screens/ReceivePaymentScreen.tsx`. [partyId] is accepted
 /// (matching the resolved navigation payload shape) but — faithfully to the
@@ -40,6 +40,7 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
   late final TextEditingController _otherDeductionCtrl;
   late final TextEditingController _referenceCtrl;
   late final TextEditingController _notesCtrl;
+  String? _bankAccountId;
 
   List<Order> _availableOrders(List<Order> orders) {
     return orders.where((o) {
@@ -86,8 +87,10 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
     _paymentMethod = PaymentMethod.bankTransfer;
     _tdsCtrl = TextEditingController(text: '0');
     _otherDeductionCtrl = TextEditingController(text: '0');
-    _referenceCtrl = TextEditingController(text: 'NEFT-${10000000 + Random().nextInt(90000000)}');
+    _referenceCtrl = TextEditingController();
     _notesCtrl = TextEditingController();
+    final banks = ref.read(banksProvider);
+    _bankAccountId = banks.isNotEmpty ? banks.first.id : null;
   }
 
   @override
@@ -116,6 +119,66 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
     });
   }
 
+  Future<void> _handleEditPayment(PaymentReceipt payment) async {
+    final amountCtrl = TextEditingController(text: '${payment.amountReceived.round()}');
+    final referenceCtrl = TextEditingController(text: payment.referenceNumber);
+    final notesCtrl = TextEditingController(text: payment.notes);
+    var method = payment.paymentMethod;
+
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Payment ${payment.receiptNumber}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: amountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount Received')),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<PaymentMethod>(
+                initialValue: method,
+                decoration: const InputDecoration(labelText: 'Payment Method'),
+                items: [for (final m in PaymentMethod.values) DropdownMenuItem(value: m, child: Text(m.jsonValue))],
+                onChanged: (v) => setDialogState(() => method = v ?? method),
+              ),
+              const SizedBox(height: 10),
+              TextField(controller: referenceCtrl, decoration: const InputDecoration(labelText: 'Reference Number')),
+              const SizedBox(height: 10),
+              TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Notes')),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('delete'),
+              child: const Text('Remove', style: TextStyle(color: Color(0xFFE11D48))),
+            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.of(context).pop('save'), child: const Text('Save')),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    if (action == 'delete') {
+      final confirmed = await showConfirmationDialog(
+        context,
+        title: 'Remove This Payment?',
+        message: 'This reverses the amount from the order and from ${payment.payerName}\'s balance. This cannot be undone.',
+        confirmLabel: 'Remove',
+        isDestructive: true,
+      );
+      if (confirmed) ref.read(paymentsProvider.notifier).removePayment(payment.id);
+    } else if (action == 'save') {
+      ref.read(paymentsProvider.notifier).updatePayment(payment.copyWith(
+            amountReceived: double.tryParse(amountCtrl.text) ?? payment.amountReceived,
+            paymentMethod: method,
+            referenceNumber: referenceCtrl.text,
+            notes: notesCtrl.text,
+          ));
+    }
+  }
+
   void _handleSubmit(Order? currentOrder) {
     final amountReceived = double.tryParse(_amountCtrl.text) ?? 0;
     if (amountReceived <= 0) {
@@ -140,9 +203,10 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
             paymentMethod: _paymentMethod,
             tdsDeducted: double.tryParse(_tdsCtrl.text) ?? 0,
             otherDeduction: double.tryParse(_otherDeductionCtrl.text) ?? 0,
-            referenceNumber: _referenceCtrl.text.isNotEmpty ? _referenceCtrl.text : 'DIRECT-CASH',
+            referenceNumber: _referenceCtrl.text,
             notes: _notesCtrl.text,
             recordedAt: '',
+            bankAccountId: _bankAccountId,
           ),
         );
 
@@ -157,6 +221,7 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
   Widget build(BuildContext context) {
     final orders = ref.watch(ordersProvider);
     final payments = ref.watch(paymentsProvider);
+    final banks = ref.watch(banksProvider);
     final currentOrder = _currentOrder(orders);
     final balanceDue = _balanceDue(currentOrder);
     final orderPaymentHistory = _selectedOrderId.isEmpty
@@ -215,6 +280,25 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
               ],
             ),
           ),
+          if (currentOrder.paymentStatus == PaymentStatus.paid) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: const Color(0xFFFFFBEB), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFFDE68A))),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: Color(0xFFB45309)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This order\'s payment is already fully received. You can still record another payment (e.g. a refund adjustment or correction) — it just won\'t be required.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFFB45309), fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
         const SizedBox(height: 12),
         Container(
@@ -350,6 +434,28 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                 ],
               ),
               const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const _FieldLabel('Deposit Into Bank Account'),
+                  TextButton(
+                    onPressed: () => context.push(AppRoutes.banksEdit),
+                    child: const Text('+ Add Bank', style: TextStyle(fontSize: 10)),
+                  ),
+                ],
+              ),
+              DropdownButtonFormField<String?>(
+                isExpanded: true,
+                initialValue: banks.any((b) => b.id == _bankAccountId) ? _bankAccountId : null,
+                decoration: _decoration(),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('-- Not linked to a bank account --', overflow: TextOverflow.ellipsis)),
+                  for (final b in banks)
+                    DropdownMenuItem(value: b.id, child: Text('${b.bankName} • ${b.accountNumber}', overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => setState(() => _bankAccountId = v),
+              ),
+              const SizedBox(height: 10),
               const _FieldLabel('Payment Notes / Remarks'),
               TextField(controller: _notesCtrl, decoration: _decoration(hint: 'e.g. 1st installment for 500 bags order')),
               const SizedBox(height: 14),
@@ -393,7 +499,8 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                             children: [
                               Text(formatINR(h.amountReceived as double), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                               Text(
-                                '${formatDate(h.paymentDate as String)} via ${(h.paymentMethod as PaymentMethod).jsonValue} • Ref: ${h.referenceNumber}',
+                                '${formatDate(h.paymentDate as String)} via ${(h.paymentMethod as PaymentMethod).jsonValue}'
+                                '${(h.referenceNumber as String).isNotEmpty ? ' • Ref: ${h.referenceNumber}' : ''}',
                                 style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                               ),
                             ],
@@ -403,6 +510,12 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(999)),
                           child: Text(h.receiptNumber as String, style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF047857), fontWeight: FontWeight.bold)),
+                        ),
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          icon: const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF94A3B8)),
+                          onPressed: () => _handleEditPayment(h as PaymentReceipt),
                         ),
                       ],
                     ),

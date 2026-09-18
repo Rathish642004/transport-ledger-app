@@ -37,8 +37,13 @@ void main() {
     return router;
   }
 
-  testWidgets('saving with defaults records the expense with correctly-mapped fields', (tester) async {
+  testWidgets('saving records the expense with correctly-mapped fields', (tester) async {
     await pumpExpenseEntry(tester);
+
+    // No field starts pre-filled with sample data — enter everything.
+    await tester.enterText(find.byType(TextField).at(0), '1500');
+    await tester.enterText(find.byType(TextField).at(2), 'Hamali paid to 4 labourers for unloading 500 bags');
+    await tester.pumpAndSettle();
 
     final before = expensesBox.length;
     await tester.tap(find.textContaining('Save Expense of'));
@@ -60,16 +65,18 @@ void main() {
       '(matches the source: only the dropdown onChange does that), and saving navigates to Order Details', (tester) async {
     await pumpExpenseEntry(tester, query: 'orderId=ord-kst-160');
 
-    // Vehicle stays at the hardcoded default — the source only auto-fills
-    // vehicle/driver from `handleOrderChange`, which the initial `orderId`
-    // prop never triggers.
-    expect(find.text('MH-04-GP-8841'), findsOneWidget);
+    // Vehicle stays empty — the source only auto-fills vehicle/driver from
+    // `handleOrderChange`, which the initial `orderId` prop never triggers.
+    expect(tester.widget<TextField>(find.byType(TextField).at(1)).controller!.text, isEmpty);
+
+    await tester.enterText(find.byType(TextField).at(0), '1500');
+    await tester.pumpAndSettle();
 
     await tester.tap(find.textContaining('Save Expense of'));
     await tester.pumpAndSettle();
 
     final saved = expensesBox.values.firstWhere((e) => e.orderId == 'ord-kst-160');
-    expect(saved.vehicleNumber, 'MH-04-GP-8841');
+    expect(saved.vehicleNumber, isEmpty);
     expect(find.text('KST/27/160'), findsWidgets); // landed on OrderDetailsScreen
 
     await tester.pump(const Duration(seconds: 4)); // flush addExpense's toast timer
@@ -78,7 +85,7 @@ void main() {
   testWidgets('validation blocks a zero amount with a warning toast', (tester) async {
     await pumpExpenseEntry(tester);
 
-    await tester.enterText(find.widgetWithText(TextField, '1500'), '0');
+    await tester.enterText(find.byType(TextField).at(0), '0');
     await tester.pumpAndSettle();
 
     final before = expensesBox.length;

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/order.dart';
+import '../providers/driver_payments_provider.dart';
 import '../providers/orders_provider.dart';
+import '../providers/payments_provider.dart';
 import '../utils/formatters.dart';
 
 /// Ported from `src/components/orders/DeleteOrderModal.tsx`. Deletes the
@@ -135,6 +137,17 @@ Future<bool> showDeleteOrderDialog(BuildContext context, WidgetRef ref, Order or
   );
 
   if (confirmed == true) {
+    // The dialog's own copy above already promises this ("...driver freight
+    // entries, and associated ledger records for this trip") — actually
+    // doing it: an order's payment receipts and driver payment vouchers
+    // would otherwise survive as orphans, still counted in the payer's/
+    // driver's outstanding balance for an order that no longer exists.
+    for (final p in ref.read(paymentsProvider).where((p) => p.orderId == order.id).toList()) {
+      ref.read(paymentsProvider.notifier).removePayment(p.id);
+    }
+    for (final dp in ref.read(driverPaymentsProvider).where((dp) => dp.orderId == order.id).toList()) {
+      ref.read(driverPaymentsProvider.notifier).removeDriverPayment(dp.id);
+    }
     ref.read(ordersProvider.notifier).deleteOrder(order.id);
     return true;
   }

@@ -60,6 +60,10 @@ dependencies:
   # tel: links from Companies/Customers/Drivers list "Call" actions
   url_launcher: ^6.3.1
 
+  # PDF export for the Orders list, and printing the bill
+  pdf: ^3.11.3
+  printing: ^5.14.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -73,6 +77,9 @@ dev_dependencies:
 
   build_runner: ^2.4.13
   hive_ce_generator: ^1.11.3
+
+  # App launcher icon generation (see `flutter_launcher_icons:` config below)
+  flutter_launcher_icons: ^0.14.3
 
 # path_provider_foundation 2.6.0+ moved to direct FFI calls to Foundation via
 # `package:objective_c`, which declares a native-assets build hook. That hook
@@ -97,6 +104,8 @@ flutter:
   # assets:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
+  assets:
+    - assets/icon/logo.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -123,3 +132,12 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# App launcher icon (Android-only, matching this app's Android-only scope).
+# Regenerate with `dart run flutter_launcher_icons` after changing the source
+# image at assets/icon/logo.png.
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: false
+  image_path: "assets/icon/logo.png"
+  min_sdk_android: 21

@@ -1,10 +1,12 @@
 import 'package:hive_ce/hive_ce.dart';
 
 import 'backup_sync_state.dart';
+import 'bank_account.dart';
 import 'company.dart';
 import 'customer.dart';
 import 'driver.dart';
 import 'driver_payment_record.dart';
+import 'driver_payout_account.dart';
 import 'enums.dart';
 import 'expense_record.dart';
 import 'order.dart';
@@ -36,5 +38,7 @@ import 'transporter_profile.dart';
   AdapterSpec<ExpenseRecord>(),
   AdapterSpec<TransporterProfile>(),
   AdapterSpec<BackupSyncState>(),
+  AdapterSpec<BankAccount>(),
+  AdapterSpec<DriverPayoutAccount>(),
 ])
 part 'hive_adapters.g.dart';

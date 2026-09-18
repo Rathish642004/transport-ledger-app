@@ -3,12 +3,13 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../models/backup_sync_state.dart';
 import '../models/enums.dart';
 import '../providers/backup_provider.dart';
 import '../providers/profile_provider.dart';
-import '../widgets/confirmation_dialog.dart';
+import '../router/app_router.dart';
 
 /// Ported from `src/screens/SettingsScreen.tsx`. [initialTab] is accepted
 /// for interface parity with the router (`?tab=gdrive_backup`, matching the
@@ -17,13 +18,24 @@ import '../widgets/confirmation_dialog.dart';
 /// render the exact same `<SettingsScreen />` with no props, so it's
 /// deliberately unused here, same as `ReportsScreen.initialTab`.
 ///
-/// Two intentional differences from the source:
+/// Three intentional differences from the source:
 /// - The Google Drive card wires up *real* sync (`BackupNotifier`) instead
 ///   of the source's fake timer — see that class's doc comment.
 /// - "Project Source Code (.ZIP)" is dropped: it downloads
 ///   `/transport-ledger.zip`, an artifact of the React app's own web
 ///   hosting. There is no equivalent for a native Android app to download
 ///   its own source from — nothing to port.
+/// - A "Bank Accounts" tile is added at the top, linking to `BanksListScreen`
+///   — the new "Banks" feature's one entry point. (Companies/Customers/
+///   Drivers tiles briefly lived here too, but that duplicated the Ledger's
+///   own tabs for the same data; removed — see `_ManageRow`'s doc comment.)
+/// - The source's single "Bank Details for Invoices & NEFT" fields
+///   (`profile.bankName`/`accountNumber`/`ifscCode`/`upiId`) are dropped from
+///   this form now that `BankAccount`s (plural, via the "Banks" tile above)
+///   are the real place to manage bank accounts — keeping both would just
+///   be two disconnected, confusing sources of "the" bank details.
+///   `BillPreviewScreen` now sources the printed bill's bank details from
+///   the first `BankAccount` on file instead of these profile fields.
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key, this.initialTab});
 
@@ -43,11 +55,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final TextEditingController _pincodeCtrl;
   late final TextEditingController _gstinCtrl;
   late final TextEditingController _panCtrl;
-  late final TextEditingController _bankNameCtrl;
-  late final TextEditingController _accountNumberCtrl;
-  late final TextEditingController _ifscCodeCtrl;
-  late final TextEditingController _branchNameCtrl;
-  late final TextEditingController _upiIdCtrl;
   late final TextEditingController _termsCtrl;
 
   bool _savedSuccess = false;
@@ -66,11 +73,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _pincodeCtrl = TextEditingController(text: profile.pincode);
     _gstinCtrl = TextEditingController(text: profile.gstin);
     _panCtrl = TextEditingController(text: profile.pan);
-    _bankNameCtrl = TextEditingController(text: profile.bankName);
-    _accountNumberCtrl = TextEditingController(text: profile.accountNumber);
-    _ifscCodeCtrl = TextEditingController(text: profile.ifscCode);
-    _branchNameCtrl = TextEditingController(text: profile.branchName);
-    _upiIdCtrl = TextEditingController(text: profile.upiId);
     _termsCtrl = TextEditingController(text: profile.termsAndConditions);
   }
 
@@ -85,11 +87,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _pincodeCtrl.dispose();
     _gstinCtrl.dispose();
     _panCtrl.dispose();
-    _bankNameCtrl.dispose();
-    _accountNumberCtrl.dispose();
-    _ifscCodeCtrl.dispose();
-    _branchNameCtrl.dispose();
-    _upiIdCtrl.dispose();
     _termsCtrl.dispose();
     super.dispose();
   }
@@ -114,11 +111,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           pincode: _pincodeCtrl.text,
           gstin: _gstinCtrl.text.toUpperCase(),
           pan: _panCtrl.text.toUpperCase(),
-          bankName: _bankNameCtrl.text,
-          accountNumber: _accountNumberCtrl.text,
-          ifscCode: _ifscCodeCtrl.text.toUpperCase(),
-          branchName: _branchNameCtrl.text,
-          upiId: _upiIdCtrl.text,
           termsAndConditions: _termsCtrl.text,
         ));
     setState(() => _savedSuccess = true);
@@ -140,19 +132,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref.read(backupProvider.notifier).restoreBackupFromJSON(content);
   }
 
-  Future<void> _handleReset(BuildContext context) async {
-    final confirmed = await showConfirmationDialog(
-      context,
-      title: 'Reset All Ledger Data?',
-      message: 'This will replace all your current orders, payments, and driver entries with the initial sample transport data. Continue?',
-      confirmLabel: 'Reset Data',
-      isDestructive: true,
-    );
-    if (confirmed) {
-      await ref.read(backupProvider.notifier).resetToSampleData();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final backup = ref.watch(backupProvider);
@@ -163,6 +142,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       children: [
         const Text('CONFIGURATION', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF0369A1))),
         const Text('Settings & Cloud Backup', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 12),
+        const _ManageRow(),
         const SizedBox(height: 12),
         _GoogleDriveCard(
           backup: backup,
@@ -277,50 +258,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Bank Details for Invoices & NEFT', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [const _FieldLabel('Bank Name'), TextField(controller: _bankNameCtrl, decoration: _decoration())],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const _FieldLabel('Account Number'),
-                              TextField(controller: _accountNumberCtrl, style: const TextStyle(fontFamily: 'monospace'), decoration: _decoration()),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const _FieldLabel('IFSC Code'),
-                              TextField(controller: _ifscCodeCtrl, textCapitalization: TextCapitalization.characters, style: const TextStyle(fontFamily: 'monospace'), decoration: _decoration()),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [const _FieldLabel('UPI ID'), TextField(controller: _upiIdCtrl, decoration: _decoration())],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
                     const _FieldLabel('Invoice Terms & Conditions'),
                     TextField(controller: _termsCtrl, maxLines: 2, decoration: _decoration()),
                   ],
@@ -339,30 +276,44 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: const Color(0xFFFFF1F2).withValues(alpha: 0.7), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFFECDD3))),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Restore Default Sample Data', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF881337))),
-              const SizedBox(height: 4),
-              const Text(
-                'Reset orders, drivers, companies, and ledgers back to default sample state.',
-                style: TextStyle(fontSize: 11, color: Color(0xFFBE123C)),
-              ),
-              const SizedBox(height: 10),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
-                onPressed: () => _handleReset(context),
-                icon: const Icon(Icons.restore, size: 14),
-                label: const Text('Reset Sample Ledger Data'),
-              ),
-            ],
-          ),
-        ),
       ],
+    );
+  }
+}
+
+/// Just "Banks" now — Companies/Customers/Drivers used to be tiles here too,
+/// but that put them in two places at once (here, and as their own Ledger
+/// tabs, which is where their per-party financials and now an Edit action
+/// already live — see `ledger_screen.dart`). Removed to leave the Ledger as
+/// the one place to browse and edit them; "Banks" stays here since it has
+/// no Ledger-tab equivalent.
+class _ManageRow extends StatelessWidget {
+  const _ManageRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => context.push(AppRoutes.banks),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFE2E8F0))),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(color: const Color(0xFFE0F2FE), borderRadius: BorderRadius.circular(12)),
+              child: const Icon(Icons.account_balance_outlined, size: 18, color: Color(0xFF0369A1)),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text('Bank Accounts', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            ),
+            Icon(Icons.chevron_right, color: Colors.grey.shade400),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -445,68 +396,66 @@ class _GoogleDriveCard extends StatelessWidget {
             ],
           ),
           if (isConnected) ...[
-            const Divider(height: 20, color: Color(0xFFF1F5F9)),
+            const Divider(height: 16, color: Color(0xFFF1F5F9)),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Auto-Backup', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 Switch(value: backup.autoBackupEnabled, onChanged: onAutoBackupChanged),
+                if (backup.autoBackupEnabled)
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: DropdownButton<BackupFrequency>(
+                        value: backup.backupFrequency,
+                        underline: const SizedBox.shrink(),
+                        isDense: true,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0C4A6E)),
+                        items: BackupFrequency.values.map((f) => DropdownMenuItem(value: f, child: Text(f.jsonValue))).toList(),
+                        onChanged: (f) {
+                          if (f != null) onFrequencyChanged(f);
+                        },
+                      ),
+                    ),
+                  )
+                else
+                  const Spacer(),
+                TextButton(
+                  style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4), minimumSize: Size.zero),
+                  onPressed: onDisconnect,
+                  child: const Text('Disconnect', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                ),
               ],
-            ),
-            if (backup.autoBackupEnabled)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Frequency', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                  DropdownButton<BackupFrequency>(
-                    value: backup.backupFrequency,
-                    underline: const SizedBox.shrink(),
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0C4A6E)),
-                    items: BackupFrequency.values.map((f) => DropdownMenuItem(value: f, child: Text(f.jsonValue))).toList(),
-                    onChanged: (f) {
-                      if (f != null) onFrequencyChanged(f);
-                    },
-                  ),
-                ],
-              ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(onPressed: onDisconnect, child: const Text('Disconnect', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)))),
             ),
           ],
           Container(
             margin: const EdgeInsets.only(top: 6),
             padding: const EdgeInsets.only(top: 10),
             decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFF1F5F9)))),
-            child: Column(
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: onExportFile,
-                        icon: const Icon(Icons.download, size: 14, color: Color(0xFF0369A1)),
-                        label: const Text('Export File', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: onRestoreFile,
-                        icon: const Icon(Icons.upload, size: 14, color: Color(0xFF059669)),
-                        label: const Text('Restore File', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                  ],
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onExportFile,
+                    icon: const Icon(Icons.download, size: 14, color: Color(0xFF0369A1)),
+                    label: const Text('Export', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onRestoreFile,
+                    icon: const Icon(Icons.upload, size: 14, color: Color(0xFF059669)),
+                    label: const Text('Restore', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
                 ),
                 if (isConnected) ...[
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'Restore from Drive',
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(10)),
                       onPressed: onRestoreFromDrive,
-                      icon: const Icon(Icons.cloud_download_outlined, size: 14, color: Color(0xFF0369A1)),
-                      label: const Text('Restore from Drive', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      child: const Icon(Icons.cloud_download_outlined, size: 16, color: Color(0xFF0369A1)),
                     ),
                   ),
                 ],

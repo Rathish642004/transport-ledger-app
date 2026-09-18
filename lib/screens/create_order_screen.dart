@@ -27,6 +27,40 @@ class CreateOrderScreen extends ConsumerStatefulWidget {
   ConsumerState<CreateOrderScreen> createState() => _CreateOrderScreenState();
 }
 
+/// The first order gets `KST/01/001`; after that, whatever the highest
+/// existing `KST/01/NNN` number is, plus one — not `orders.length + 1`,
+/// which would hand out a number that already exists (or is now free again)
+/// the moment an order in the middle of the sequence gets deleted.
+String _nextOrderNumber(List<Order> orders) {
+  const prefix = 'KST/01/';
+  final pattern = RegExp('^${RegExp.escape(prefix)}(\\d+)\$');
+  var highest = 0;
+  for (final order in orders) {
+    final match = pattern.firstMatch(order.orderNumber);
+    if (match == null) continue;
+    final n = int.parse(match.group(1)!);
+    if (n > highest) highest = n;
+  }
+  return '$prefix${(highest + 1).toString().padLeft(3, '0')}';
+}
+
+/// Distinct goods descriptions already used on other orders, filtered by
+/// [query] (case-insensitive substring match) — the Autocomplete's
+/// `optionsBuilder`. A `Set` (not just dropping later repeats) is what keeps
+/// e.g. 20 past orders that all shipped "Cotton Yarn,10s/2 KW" from listing
+/// that same suggestion 20 times.
+Iterable<String> _previousGoodsDescriptions(List<Order> orders, String query) {
+  final distinct = <String>{};
+  for (final order in orders) {
+    final desc = (order.goodsDescription?.trim().isNotEmpty ?? false) ? order.goodsDescription!.trim() : order.bagType.trim();
+    if (desc.isNotEmpty) distinct.add(desc);
+  }
+  final options = distinct.toList()..sort();
+  if (query.isEmpty) return options;
+  final lowerQuery = query.toLowerCase();
+  return options.where((g) => g.toLowerCase().contains(lowerQuery));
+}
+
 enum _Section { details, charges, driver, billing }
 
 class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
@@ -117,34 +151,50 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
     final companies = ref.read(companiesProvider);
     final customers = ref.read(customersProvider);
     final drivers = ref.read(driversProvider);
-    final nextOrderNumber = 'KST/27/${ref.read(ordersProvider).length + 164}';
+    final nextOrderNumber = _nextOrderNumber(ref.read(ordersProvider));
 
     _orderNumber = initial?.orderNumber ?? nextOrderNumber;
     _lrNumberCtrl = TextEditingController(text: initial?.lrNumber ?? initial?.orderNumber ?? nextOrderNumber);
     _orderDate = initial?.orderDate ?? getTodayDateString();
 
-    _companyId = initial?.companyId ?? (companies.isNotEmpty ? companies.first.id : '');
-    _companyName = initial?.companyName ?? (companies.isNotEmpty ? companies.first.name : 'PRABHU SPINNING MILLS PRIVATE LIMITED');
-    _consignorDivisionCtrl = TextEditingController(text: initial?.consignorDivision ?? 'OE DIVISION');
-    _consignorAddressCtrl =
-        TextEditingController(text: initial?.consignorAddress ?? initial?.pickupLocation ?? 'KOTTAIYUR, AGARAM, DINDIGUL-624 -709');
+    // On a brand-new order (no `initial`), the first company/customer in
+    // each list is auto-selected — matching `_onCompanyChanged`/
+    // `_onCustomerChanged`'s own address-building logic, so the fields it
+    // fills in look the same whether that "selection" happened by default or
+    // because the user actually picked from the dropdown.
+    final autoCompany = initial == null && companies.isNotEmpty ? companies.first : null;
+    final autoCustomer = initial == null && customers.isNotEmpty ? customers.first : null;
 
-    _customerId = initial?.customerId ?? (customers.isNotEmpty ? customers.first.id : '');
-    _customerName = initial?.customerName ?? (customers.isNotEmpty ? customers.first.name : 'ECO JUTE P LTD');
-    _consigneeAddressCtrl =
-        TextEditingController(text: initial?.consigneeAddress ?? 'KANKARIA STREET,6Th floor ,Room No ,6\nKOLAKTTA-700071');
+    _companyId = initial?.companyId ?? autoCompany?.id ?? '';
+    _companyName = initial?.companyName ?? autoCompany?.name ?? '';
+    _consignorDivisionCtrl = TextEditingController(text: initial?.consignorDivision ?? 'OE Division');
+    final autoCompanyAddress = autoCompany == null
+        ? null
+        : (autoCompany.address.isNotEmpty ? '${autoCompany.address}, ${autoCompany.city}' : autoCompany.city);
+    _consignorAddressCtrl = TextEditingController(text: initial?.consignorAddress ?? initial?.pickupLocation ?? autoCompanyAddress ?? '');
 
-    _deliveryAddressCtrl = TextEditingController(text: initial?.deliveryAddress ?? 'FASHION PROCESS MILL\nMANNARAI, TIRUPPUR-641 607');
-    _pickupLocationCtrl = TextEditingController(text: initial?.pickupLocation ?? 'OE Division, Agaram, Dindigul');
-    _deliveryLocationCtrl = TextEditingController(text: initial?.deliveryLocation ?? 'Fashion Process Mill, Mannarai, Tiruppur');
-    _vehicleNumberCtrl = TextEditingController(text: initial?.vehicleNumber ?? 'TN30Y4407');
-    _invoiceDetailsCtrl = TextEditingController(text: initial?.invoiceDetails ?? 'OYIS/26-27/168');
+    _customerId = initial?.customerId ?? autoCustomer?.id ?? '';
+    _customerName = initial?.customerName ?? autoCustomer?.name ?? '';
+    final autoCustomerAddress = autoCustomer == null
+        ? null
+        : (autoCustomer.deliveryAddress.isNotEmpty ? '${autoCustomer.deliveryAddress}, ${autoCustomer.city}' : autoCustomer.city);
+    _consigneeAddressCtrl = TextEditingController(text: initial?.consigneeAddress ?? autoCustomerAddress ?? '');
 
-    _driverId = initial?.driverId ?? (drivers.isNotEmpty ? drivers.first.id : '');
-    _driverName = initial?.driverName ?? (drivers.isNotEmpty ? drivers.first.name : 'K. Selvaraj');
+    _deliveryAddressCtrl = TextEditingController(text: initial?.deliveryAddress ?? autoCustomerAddress ?? '');
+    _pickupLocationCtrl = TextEditingController(text: initial?.pickupLocation ?? autoCompanyAddress ?? '');
+    _deliveryLocationCtrl = TextEditingController(text: initial?.deliveryLocation ?? autoCustomerAddress ?? '');
+    _invoiceDetailsCtrl = TextEditingController(text: initial?.invoiceDetails ?? '');
+
+    final autoDriver = initial == null && drivers.isNotEmpty ? drivers.first : null;
+    _driverId = initial?.driverId ?? autoDriver?.id ?? '';
+    _driverName = initial?.driverName ?? autoDriver?.name ?? '';
+    // Auto-selecting the first driver should also auto-fill their (first)
+    // vehicle, the same as actually picking them from the dropdown does —
+    // see `_onDriverChanged`.
+    _vehicleNumberCtrl = TextEditingController(text: initial?.vehicleNumber ?? autoDriver?.vehicleNumber ?? '');
 
     _numberOfBags = initial?.numberOfBags ?? 55;
-    _goodsDescriptionCtrl = TextEditingController(text: initial?.goodsDescription ?? initial?.bagType ?? 'Cotton Yarn,10s/2 KW');
+    _goodsDescriptionCtrl = TextEditingController(text: initial?.goodsDescription ?? initial?.bagType ?? '');
     _ratePerBag = initial?.ratePerBag ?? 100;
     _orderNotesCtrl = TextEditingController(text: initial?.notes ?? '');
 
@@ -416,6 +466,7 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
     final companies = ref.watch(companiesProvider);
     final customers = ref.watch(customersProvider);
     final drivers = ref.watch(driversProvider);
+    final orders = ref.watch(ordersProvider);
     final estimatedProfit =
         _totalCustomerBill -
         _driverFreight -
@@ -456,6 +507,7 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
             companies: companies,
             customers: customers,
             drivers: drivers,
+            orders: orders,
           ),
         ),
         const SizedBox(height: 12),
@@ -848,12 +900,14 @@ class _Section1Details extends StatelessWidget {
     required this.companies,
     required this.customers,
     required this.drivers,
+    required this.orders,
   });
 
   final _CreateOrderScreenState state;
   final List<Company> companies;
   final List<Customer> customers;
   final List<Driver> drivers;
+  final List<Order> orders;
 
   @override
   Widget build(BuildContext context) {
@@ -1046,15 +1100,20 @@ class _Section1Details extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const _FieldLabel('Vehicle Number *'),
-                  TextField(
-                    controller: state._vehicleNumberCtrl,
-                    textCapitalization: TextCapitalization.characters,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.bold,
-                    ),
-                    decoration: _fieldDecoration(hint: 'TN30Y4407'),
-                  ),
+                  Builder(builder: (context) {
+                    final driverMatches = drivers.where((d) => d.id == state._driverId);
+                    final vehicles = driverMatches.isNotEmpty ? driverMatches.first.allVehicleNumbers : const <String>[];
+                    return DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: vehicles.contains(state._vehicleNumberCtrl.text) ? state._vehicleNumberCtrl.text : null,
+                      decoration: _fieldDecoration(hint: vehicles.isEmpty ? 'Select a driver first' : null),
+                      items: [
+                        for (final v in vehicles)
+                          DropdownMenuItem(value: v, child: Text(v, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold))),
+                      ],
+                      onChanged: vehicles.isEmpty ? null : (v) => state.applyChange(() => state._vehicleNumberCtrl.text = v!),
+                    );
+                  }),
                 ],
               ),
             ),
@@ -1116,9 +1175,18 @@ class _Section1Details extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               const _FieldLabel('Goods Description *'),
-              TextField(
-                controller: state._goodsDescriptionCtrl,
-                decoration: _fieldDecoration(hint: 'e.g. Cotton Yarn,10s/2 KW'),
+              Autocomplete<String>(
+                initialValue: TextEditingValue(text: state._goodsDescriptionCtrl.text),
+                optionsBuilder: (query) => _previousGoodsDescriptions(orders, query.text),
+                onSelected: (selection) => state._goodsDescriptionCtrl.text = selection,
+                fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                  return TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    decoration: _fieldDecoration(hint: 'e.g. Cotton Yarn,10s/2 KW'),
+                    onChanged: (v) => state._goodsDescriptionCtrl.text = v,
+                  );
+                },
               ),
               const SizedBox(height: 8),
               _GoodsMathRow(state: state),

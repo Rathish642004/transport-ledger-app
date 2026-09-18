@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for Google Sign-In and the Google Drive backup/restore API
+         calls (drive_backup_client.dart) — the debug/profile manifests grant
+         this automatically for local runs, but release builds only ship
+         this main manifest, so it must be declared here too. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="Transport Ledger"
         android:name="${applicationName}"

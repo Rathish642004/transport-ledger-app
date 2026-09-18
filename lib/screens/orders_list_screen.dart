@@ -4,15 +4,20 @@ import 'package:go_router/go_router.dart';
 
 import '../models/enums.dart';
 import '../models/order.dart';
+import '../providers/companies_provider.dart';
+import '../providers/customers_provider.dart';
 import '../providers/orders_provider.dart';
 import '../router/app_router.dart';
+import '../services/orders_export.dart';
 import '../utils/formatters.dart';
 import '../widgets/delete_order_dialog.dart';
 import '../widgets/filter_chips.dart';
 import '../widgets/order_notes_dialog.dart';
 import '../widgets/status_badge.dart';
 
-/// Ported from `src/screens/OrdersListScreen.tsx`.
+/// Ported from `src/screens/OrdersListScreen.tsx`, plus three additions not
+/// in the source: Company/Customer filters, a date-range filter, and
+/// PDF/Excel(CSV) export of the currently-filtered list.
 class OrdersListScreen extends ConsumerStatefulWidget {
   const OrdersListScreen({super.key});
 
@@ -24,6 +29,10 @@ class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
   String _statusFilter = 'all';
+  String? _companyId;
+  String? _customerId;
+  DateTimeRange? _dateRange;
+  bool _exporting = false;
 
   @override
   void dispose() {
@@ -31,9 +40,35 @@ class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
     super.dispose();
   }
 
+  Future<void> _pickDateRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(now.year + 1),
+      initialDateRange: _dateRange,
+    );
+    if (picked != null) setState(() => _dateRange = picked);
+  }
+
+  Future<void> _handleExport(String format, List<Order> filteredOrders) async {
+    setState(() => _exporting = true);
+    try {
+      if (format == 'pdf') {
+        await exportOrdersPdf(filteredOrders);
+      } else {
+        await exportOrdersCsv(filteredOrders);
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final orders = ref.watch(ordersProvider);
+    final companies = ref.watch(companiesProvider);
+    final customers = ref.watch(customersProvider);
 
     final filterOptions = [
       FilterOption(id: 'all', label: 'All Orders', count: orders.length),
@@ -66,6 +101,18 @@ class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
             o.deliveryLocation.toLowerCase().contains(q) ||
             o.bagType.toLowerCase().contains(q);
         if (!matches) return false;
+      }
+
+      if (_companyId != null && o.companyId != _companyId) return false;
+      if (_customerId != null && o.customerId != _customerId) return false;
+
+      if (_dateRange != null) {
+        final orderDate = DateTime.tryParse(o.orderDate);
+        if (orderDate == null) return false;
+        final day = DateTime(orderDate.year, orderDate.month, orderDate.day);
+        final start = DateTime(_dateRange!.start.year, _dateRange!.start.month, _dateRange!.start.day);
+        final end = DateTime(_dateRange!.end.year, _dateRange!.end.month, _dateRange!.end.day);
+        if (day.isBefore(start) || day.isAfter(end)) return false;
       }
 
       return true;
@@ -108,13 +155,91 @@ class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String?>(
+                  isExpanded: true,
+                  initialValue: _companyId,
+                  isDense: true,
+                  decoration: _filterDecoration(),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('All Companies', overflow: TextOverflow.ellipsis)),
+                    for (final c in companies) DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis)),
+                  ],
+                  onChanged: (v) => setState(() => _companyId = v),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: DropdownButtonFormField<String?>(
+                  isExpanded: true,
+                  initialValue: _customerId,
+                  isDense: true,
+                  decoration: _filterDecoration(),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('All Customers', overflow: TextOverflow.ellipsis)),
+                    for (final c in customers) DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis)),
+                  ],
+                  onChanged: (v) => setState(() => _customerId = v),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _pickDateRange,
+                  icon: const Icon(Icons.date_range_outlined, size: 14),
+                  label: Text(
+                    _dateRange == null
+                        ? 'Filter by Date'
+                        : _dateRange!.start == _dateRange!.end
+                            ? formatShortDate(_dateRange!.start.toIso8601String())
+                            : '${formatShortDate(_dateRange!.start.toIso8601String())} – ${formatShortDate(_dateRange!.end.toIso8601String())}',
+                    style: const TextStyle(fontSize: 11),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              if (_dateRange != null)
+                IconButton(icon: const Icon(Icons.clear, size: 16), onPressed: () => setState(() => _dateRange = null)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Showing ${filteredOrders.length} orders', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-              TextButton.icon(
-                onPressed: () => context.push(AppRoutes.createOrder),
-                icon: const Icon(Icons.add, size: 14),
-                label: const Text('New Order', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              Row(
+                children: [
+                  _exporting
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 8),
+                          child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                        )
+                      : PopupMenuButton<String>(
+                          tooltip: 'Export list',
+                          icon: const Icon(Icons.ios_share, size: 18, color: Color(0xFF0369A1)),
+                          onSelected: (v) => _handleExport(v, filteredOrders),
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(value: 'pdf', child: Text('Export as PDF')),
+                            PopupMenuItem(value: 'excel', child: Text('Export as Excel (CSV)')),
+                          ],
+                        ),
+                  TextButton.icon(
+                    onPressed: () => context.push(AppRoutes.createOrder),
+                    icon: const Icon(Icons.add, size: 14),
+                    label: const Text('New Order', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                ],
               ),
             ],
           ),
@@ -385,3 +510,11 @@ class _CardActionButton extends StatelessWidget {
     );
   }
 }
+
+InputDecoration _filterDecoration() => InputDecoration(
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      filled: true,
+      fillColor: Colors.white,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+    );

@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:flutter_app/main.dart';
+import 'package:flutter_app/models/bank_account.dart';
+import 'package:flutter_app/models/driver_payout_account.dart';
 import 'package:flutter_app/storage/hive_boxes.dart';
 
 import '../test_helpers/hive_test_env.dart';
@@ -63,6 +65,38 @@ void main() {
     expect(updatedDriver.totalAmountPaid, 29400 + 1200);
 
     await tester.pump(const Duration(seconds: 4)); // flush payDriver's toast timer
+  });
+
+  testWidgets('pre-selects the driver\'s own first payout account, and lets it be changed', (tester) async {
+    driversBox.put(
+      'drv-1',
+      driversBox.get('drv-1')!.copyWith(payoutAccounts: [
+        const DriverPayoutAccount(id: 'acct-1', label: 'first@ybl', upiId: 'first@ybl'),
+        const DriverPayoutAccount(id: 'acct-2', label: 'second@ybl', upiId: 'second@ybl'),
+      ]),
+    );
+    banksBox.put('bank-1', const BankAccount(id: 'bank-1', bankName: 'SBI', accountHolderName: 'Owner', accountNumber: '111', ifscCode: 'SBIN0001', branchName: 'HQ'));
+
+    await pumpPayDriver(tester, query: 'orderId=ord-kst-162&driverId=drv-1');
+
+    expect(find.text('first@ybl'), findsOneWidget); // pre-selected as the driver's first account
+
+    await tester.tap(find.byKey(const Key('driverPayoutAccountDropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('second@ybl').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('second@ybl'), findsOneWidget);
+
+    await tester.tap(find.textContaining('Confirm Driver Payment of'));
+    await tester.pumpAndSettle();
+
+    // ord-kst-162 already has seeded driver payments, so disambiguate by the
+    // bank account (only this new submission sets one).
+    final saved = driverPaymentsBox.values.firstWhere((p) => p.orderId == 'ord-kst-162' && p.bankAccountId == 'bank-1');
+    expect(saved.driverPayoutAccountId, 'acct-2');
+
+    await tester.pump(const Duration(seconds: 4));
   });
 
   testWidgets('validation blocks a zero amount with a warning toast', (tester) async {

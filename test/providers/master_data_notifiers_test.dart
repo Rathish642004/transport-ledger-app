@@ -115,6 +115,54 @@ void main() {
     });
   });
 
+  group('DriversNotifier payout accounts', () {
+    test('addPayoutAccount appends a bank-based account with a derived label', () {
+      final driver = container.read(driversProvider.notifier).saveDriver(
+            name: 'Payout Test Driver',
+            phone: '111',
+            vehicleNumber: 'TN00X0000',
+          );
+
+      container.read(driversProvider.notifier).addPayoutAccount(
+            driverId: driver.id,
+            bankName: 'SBI',
+            accountNumber: '12345',
+            ifscCode: 'SBIN0001',
+          );
+
+      final updated = container.read(driversProvider).firstWhere((d) => d.id == driver.id);
+      expect(updated.payoutAccounts, hasLength(1));
+      expect(updated.payoutAccounts.single.label, 'SBI - 12345');
+    });
+
+    test('addPayoutAccount with only a UPI ID labels the account with it', () {
+      final driver = container.read(driversProvider.notifier).saveDriver(
+            name: 'UPI Driver',
+            phone: '111',
+            vehicleNumber: 'TN00X0001',
+          );
+
+      container.read(driversProvider.notifier).addPayoutAccount(driverId: driver.id, upiId: 'driver@ybl');
+
+      final updated = container.read(driversProvider).firstWhere((d) => d.id == driver.id);
+      expect(updated.payoutAccounts.single.label, 'driver@ybl');
+    });
+
+    test('removePayoutAccount removes only the targeted account', () {
+      final notifier = container.read(driversProvider.notifier);
+      final driver = notifier.saveDriver(name: 'Two Accounts Driver', phone: '111', vehicleNumber: 'TN00X0002');
+      notifier.addPayoutAccount(driverId: driver.id, upiId: 'first@ybl');
+      notifier.addPayoutAccount(driverId: driver.id, upiId: 'second@ybl');
+      final toRemove = container.read(driversProvider).firstWhere((d) => d.id == driver.id).payoutAccounts.first;
+
+      notifier.removePayoutAccount(driverId: driver.id, accountId: toRemove.id);
+
+      final updated = container.read(driversProvider).firstWhere((d) => d.id == driver.id);
+      expect(updated.payoutAccounts, hasLength(1));
+      expect(updated.payoutAccounts.single.label, 'second@ybl');
+    });
+  });
+
   test('ExpensesNotifier.addExpense assigns id/expenseNumber', () {
     final expense = container.read(expensesProvider.notifier).addExpense(
           const ExpenseRecord(

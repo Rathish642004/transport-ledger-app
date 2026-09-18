@@ -9,6 +9,7 @@ extension HiveRegistrar on HiveInterface {
   void registerAdapters() {
     registerAdapter(BackupFrequencyAdapter());
     registerAdapter(BackupSyncStateAdapter());
+    registerAdapter(BankAccountAdapter());
     registerAdapter(BillingDetailsAdapter());
     registerAdapter(CompanyAdapter());
     registerAdapter(CustomerAdapter());
@@ -16,6 +17,7 @@ extension HiveRegistrar on HiveInterface {
     registerAdapter(DriverExpenseAdapter());
     registerAdapter(DriverPaymentRecordAdapter());
     registerAdapter(DriverPaymentStatusAdapter());
+    registerAdapter(DriverPayoutAccountAdapter());
     registerAdapter(ExpenseCategoryAdapter());
     registerAdapter(ExpenseRecordAdapter());
     registerAdapter(FinancialSummaryAdapter());
@@ -36,6 +38,7 @@ extension IsolatedHiveRegistrar on IsolatedHiveInterface {
   void registerAdapters() {
     registerAdapter(BackupFrequencyAdapter());
     registerAdapter(BackupSyncStateAdapter());
+    registerAdapter(BankAccountAdapter());
     registerAdapter(BillingDetailsAdapter());
     registerAdapter(CompanyAdapter());
     registerAdapter(CustomerAdapter());
@@ -43,6 +46,7 @@ extension IsolatedHiveRegistrar on IsolatedHiveInterface {
     registerAdapter(DriverExpenseAdapter());
     registerAdapter(DriverPaymentRecordAdapter());
     registerAdapter(DriverPaymentStatusAdapter());
+    registerAdapter(DriverPayoutAccountAdapter());
     registerAdapter(ExpenseCategoryAdapter());
     registerAdapter(ExpenseRecordAdapter());
     registerAdapter(FinancialSummaryAdapter());

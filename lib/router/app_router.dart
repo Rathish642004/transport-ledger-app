@@ -5,7 +5,10 @@ import '../models/enums.dart';
 import '../models/order.dart';
 import '../screens/add_edit_company_screen.dart';
 import '../screens/add_edit_customer_screen.dart';
+import '../screens/add_edit_bank_screen.dart';
 import '../screens/add_edit_driver_screen.dart';
+import '../screens/bank_transactions_screen.dart';
+import '../screens/banks_list_screen.dart';
 import '../screens/bill_preview_screen.dart';
 import '../screens/companies_list_screen.dart';
 import '../screens/create_order_screen.dart';
@@ -14,12 +17,14 @@ import '../screens/dashboard_screen.dart';
 import '../screens/drivers_list_screen.dart';
 import '../screens/expense_entry_screen.dart';
 import '../screens/ledger_screen.dart';
+import '../screens/onboarding_screen.dart';
 import '../screens/order_details_screen.dart';
 import '../screens/orders_list_screen.dart';
 import '../screens/pay_driver_screen.dart';
 import '../screens/receive_payment_screen.dart';
 import '../screens/reports_screen.dart';
 import '../screens/settings_screen.dart';
+import '../storage/hive_boxes.dart' as hive;
 import '../widgets/app_shell.dart';
 
 /// Route paths, named so `AppShell` and tests can reference them without
@@ -27,6 +32,7 @@ import '../widgets/app_shell.dart';
 class AppRoutes {
   AppRoutes._();
 
+  static const onboarding = '/onboarding';
   static const dashboard = '/';
   static const orders = '/orders';
   static const createOrder = '/orders/create';
@@ -44,9 +50,13 @@ class AppRoutes {
   static const companiesEdit = '/companies/edit';
   static const customersEdit = '/customers/edit';
   static const driversEdit = '/drivers/edit';
+  static const banks = '/banks';
+  static const banksEdit = '/banks/edit';
+  static const bankTransactions = '/banks/:id/transactions';
 
   static String orderDetailsPath(String id) => '/orders/$id';
   static String billPreviewPath(String id) => '/orders/$id/bill';
+  static String bankTransactionsPath(String id) => '/banks/$id/transactions';
 }
 
 /// Resolved route table (see the implementation plan's "Resolved: navigation
@@ -63,7 +73,21 @@ class AppRoutes {
 final goRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: AppRoutes.dashboard,
+    // First run (or any launch before a profile has been created/restored)
+    // is gated to `OnboardingScreen` — see its doc comment. `profileBox` is
+    // opened synchronously in `initHive` before the router is ever built, so
+    // this read is safe on every redirect check, not just the first.
+    redirect: (context, state) {
+      final needsOnboarding = hive.profileBox.isEmpty;
+      final onOnboarding = state.matchedLocation == AppRoutes.onboarding;
+      if (needsOnboarding) return onOnboarding ? null : AppRoutes.onboarding;
+      return onOnboarding ? AppRoutes.dashboard : null;
+    },
     routes: [
+      GoRoute(
+        path: AppRoutes.onboarding,
+        builder: (context, state) => const OnboardingScreen(),
+      ),
       ShellRoute(
         builder: (context, state, child) => AppShell(child: child),
         routes: [
@@ -110,7 +134,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: AppRoutes.ledger,
-            builder: (context, state) => const LedgerScreen(),
+            builder: (context, state) => LedgerScreen(initialTab: state.uri.queryParameters['tab']),
           ),
           GoRoute(
             path: AppRoutes.reports,
@@ -143,6 +167,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.driversEdit,
             builder: (context, state) => AddEditDriverScreen(driverId: state.uri.queryParameters['id']),
+          ),
+          GoRoute(
+            path: AppRoutes.banks,
+            builder: (context, state) => const BanksListScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.banksEdit,
+            builder: (context, state) => AddEditBankScreen(bankAccountId: state.uri.queryParameters['id']),
+          ),
+          GoRoute(
+            path: AppRoutes.bankTransactions,
+            builder: (context, state) => BankTransactionsScreen(bankAccountId: state.pathParameters['id']!),
           ),
         ],
       ),

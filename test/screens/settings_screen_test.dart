@@ -68,6 +68,23 @@ void main() {
     expect(find.text('KALAVATHI SELVARAJ TRANSPORT'), findsOneWidget);
   });
 
+  testWidgets('the Bank Accounts tile is the only "Manage" entry, and it opens Banks', (tester) async {
+    await pumpSettings(tester);
+
+    // Companies/Customers/Drivers tiles were removed from here — the Ledger
+    // tabs are now the one place to browse and edit them (see
+    // `_ManageRow`'s doc comment).
+    expect(find.text('Companies'), findsNothing);
+    expect(find.text('Customers'), findsNothing);
+    expect(find.text('Drivers'), findsNothing);
+    expect(find.text('Bank Accounts'), findsOneWidget);
+
+    await tester.tap(find.text('Bank Accounts'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Your Bank Accounts'), findsOneWidget);
+  });
+
   testWidgets('Connect Drive signs in and immediately syncs', (tester) async {
     await pumpSettings(tester);
 
@@ -99,18 +116,4 @@ void main() {
     await tester.pump(const Duration(seconds: 4)); // flush both the toast and the "Saved" reset timers
   });
 
-  testWidgets('Reset Sample Ledger Data asks for confirmation, then restores the 5 seed orders', (tester) async {
-    await pumpSettings(tester);
-
-    await tester.tap(find.text('Reset Sample Ledger Data'));
-    await tester.pumpAndSettle();
-    expect(find.text('Reset All Ledger Data?'), findsOneWidget);
-
-    await tester.tap(find.text('Reset Data'));
-    await tester.pumpAndSettle();
-
-    expect(ordersBox.length, 5);
-
-    await tester.pump(const Duration(seconds: 4)); // flush the reset toast timer
-  });
 }
