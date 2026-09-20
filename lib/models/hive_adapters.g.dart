@@ -548,7 +548,6 @@ class OrderAdapter extends TypeAdapter<Order> {
       pickupLocation: fields[12] as String,
       deliveryLocation: fields[13] as String,
       vehicleNumber: fields[14] as String,
-      invoiceDetails: fields[15] as String?,
       numberOfBags: (fields[18] as num).toInt(),
       bagType: fields[19] as String,
       goodsDescription: fields[20] as String?,
@@ -573,7 +572,7 @@ class OrderAdapter extends TypeAdapter<Order> {
   @override
   void write(BinaryWriter writer, Order obj) {
     writer
-      ..writeByte(32)
+      ..writeByte(31)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -604,8 +603,6 @@ class OrderAdapter extends TypeAdapter<Order> {
       ..write(obj.deliveryLocation)
       ..writeByte(14)
       ..write(obj.vehicleNumber)
-      ..writeByte(15)
-      ..write(obj.invoiceDetails)
       ..writeByte(18)
       ..write(obj.numberOfBags)
       ..writeByte(19)

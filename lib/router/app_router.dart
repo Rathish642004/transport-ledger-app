@@ -18,6 +18,7 @@ import '../screens/ledger_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/order_details_screen.dart';
 import '../screens/orders_list_screen.dart';
+import '../screens/party_ledger_detail_screen.dart';
 import '../screens/receive_payment_screen.dart';
 import '../screens/reports_screen.dart';
 import '../screens/settings_screen.dart';
@@ -44,12 +45,16 @@ class AppRoutes {
   static const customers = '/customers';
   static const companiesEdit = '/companies/edit';
   static const customersEdit = '/customers/edit';
+  static const companyLedger = '/ledger/company/:id';
+  static const customerLedger = '/ledger/customer/:id';
   static const banks = '/banks';
   static const banksEdit = '/banks/edit';
   static const bankTransactions = '/banks/:id/transactions';
 
   static String orderDetailsPath(String id) => '/orders/$id';
   static String billPreviewPath(String id) => '/orders/$id/bill';
+  static String companyLedgerPath(String id) => '/ledger/company/$id';
+  static String customerLedgerPath(String id) => '/ledger/customer/$id';
   static String bankTransactionsPath(String id) => '/banks/$id/transactions';
 }
 
@@ -145,6 +150,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.customersEdit,
             builder: (context, state) => AddEditCustomerScreen(customerId: state.uri.queryParameters['id']),
+          ),
+          GoRoute(
+            path: AppRoutes.companyLedger,
+            builder: (context, state) =>
+                PartyLedgerDetailScreen(payerType: PayerType.company, partyId: state.pathParameters['id']!),
+          ),
+          GoRoute(
+            path: AppRoutes.customerLedger,
+            builder: (context, state) =>
+                PartyLedgerDetailScreen(payerType: PayerType.customer, partyId: state.pathParameters['id']!),
           ),
           GoRoute(
             path: AppRoutes.banks,

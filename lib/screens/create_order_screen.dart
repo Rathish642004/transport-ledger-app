@@ -98,7 +98,6 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
   late final TextEditingController _pickupLocationCtrl;
   late final TextEditingController _deliveryLocationCtrl;
   late final TextEditingController _vehicleNumberCtrl;
-  late final TextEditingController _invoiceDetailsCtrl;
 
   late int _numberOfBags;
   late final TextEditingController _goodsDescriptionCtrl;
@@ -211,7 +210,6 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
     _pickupLocationCtrl = TextEditingController(text: initial?.pickupLocation ?? autoCompanyAddress ?? '');
     _deliveryLocationCtrl = TextEditingController(text: initial?.deliveryLocation ?? autoCustomerAddress ?? '');
     _vehicleNumberCtrl = TextEditingController(text: initial?.vehicleNumber ?? '');
-    _invoiceDetailsCtrl = TextEditingController(text: initial?.invoiceDetails ?? '');
 
     _numberOfBags = initial?.numberOfBags ?? 55;
     _goodsDescriptionCtrl = TextEditingController(text: initial?.goodsDescription ?? initial?.bagType ?? '');
@@ -249,7 +247,6 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
       _pickupLocationCtrl,
       _deliveryLocationCtrl,
       _vehicleNumberCtrl,
-      _invoiceDetailsCtrl,
       _goodsDescriptionCtrl,
       _orderNotesCtrl,
       _billRecipientNameCtrl,
@@ -372,7 +369,6 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
       pickupLocation: _pickupLocationCtrl.text,
       deliveryLocation: _deliveryLocationCtrl.text,
       vehicleNumber: vehicleNumber,
-      invoiceDetails: _invoiceDetailsCtrl.text,
       numberOfBags: _numberOfBags,
       bagType: _goodsDescriptionCtrl.text,
       goodsDescription: _goodsDescriptionCtrl.text,
@@ -848,39 +844,15 @@ class _Section1Details extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _FieldLabel('LR Number *'),
-                  TextField(
-                    controller: state._lrNumberCtrl,
-                    onChanged: state._onLrNumberChanged,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.bold,
-                    ),
-                    decoration: _fieldDecoration(hint: 'e.g. KST/27/162'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _FieldLabel('Invoice Details *'),
-                  TextField(
-                    controller: state._invoiceDetailsCtrl,
-                    decoration: _fieldDecoration(hint: 'e.g. OYIS/26-27/168'),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        const _FieldLabel('LR Number *'),
+        TextField(
+          controller: state._lrNumberCtrl,
+          onChanged: state._onLrNumberChanged,
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontWeight: FontWeight.bold,
+          ),
+          decoration: _fieldDecoration(hint: 'e.g. KST/27/162'),
         ),
         const SizedBox(height: 12),
         Container(

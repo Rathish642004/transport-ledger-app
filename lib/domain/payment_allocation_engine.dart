@@ -8,24 +8,44 @@ import '../models/payment_allocation.dart';
 double expectedReceiptFor(Order order) =>
     order.billing.netExpectedReceipt != 0 ? order.billing.netExpectedReceipt : order.charges.totalCustomerBill;
 
+/// Whether [order] is billed to [partyId] as the given [payerType] — the one
+/// place this match is made, by id only, never by name (see the ledger
+/// double-count bug this replaces).
+bool _billedTo(Order order, PayerType payerType, String partyId) {
+  if (order.billing.billPayer != payerType) return false;
+  return payerType == PayerType.company ? order.companyId == partyId : order.customerId == partyId;
+}
+
 /// The still-open (not cancelled) orders billed to [partyId] as the given
 /// [payerType], oldest-first (`orderDate` then `createdAt`) — the FIFO
-/// sequence a lump-sum payment is applied against. Matches by id only, never
-/// by name (see the ledger double-count bug this replaces).
+/// sequence a lump-sum payment is applied against.
 List<Order> openOrdersForParty(
   List<Order> orders, {
   required PayerType payerType,
   required String partyId,
 }) {
-  final matches = orders.where((o) {
-    if (o.orderStatus == OrderStatus.cancelled) return false;
-    if (o.billing.billPayer != payerType) return false;
-    return payerType == PayerType.company ? o.companyId == partyId : o.customerId == partyId;
-  }).toList();
+  final matches = orders.where((o) => o.orderStatus != OrderStatus.cancelled && _billedTo(o, payerType, partyId)).toList();
   matches.sort((a, b) {
     final byDate = a.orderDate.compareTo(b.orderDate);
     if (byDate != 0) return byDate;
     return a.createdAt.compareTo(b.createdAt);
+  });
+  return matches;
+}
+
+/// Every order (including cancelled/fully-paid ones) billed to [partyId] as
+/// the given [payerType], newest-first — the full order history shown on
+/// that party's ledger detail page.
+List<Order> ordersForParty(
+  List<Order> orders, {
+  required PayerType payerType,
+  required String partyId,
+}) {
+  final matches = orders.where((o) => _billedTo(o, payerType, partyId)).toList();
+  matches.sort((a, b) {
+    final byDate = b.orderDate.compareTo(a.orderDate);
+    if (byDate != 0) return byDate;
+    return b.createdAt.compareTo(a.createdAt);
   });
   return matches;
 }

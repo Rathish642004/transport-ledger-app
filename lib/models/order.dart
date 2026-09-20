@@ -295,7 +295,6 @@ class Order {
     required this.pickupLocation,
     required this.deliveryLocation,
     required this.vehicleNumber,
-    this.invoiceDetails,
     required this.numberOfBags,
     required this.bagType,
     this.goodsDescription,
@@ -329,7 +328,6 @@ class Order {
   final String pickupLocation;
   final String deliveryLocation;
   final String vehicleNumber;
-  final String? invoiceDetails;
   final int numberOfBags;
   final String bagType;
   final String? goodsDescription;
@@ -370,7 +368,6 @@ class Order {
     String? pickupLocation,
     String? deliveryLocation,
     String? vehicleNumber,
-    String? invoiceDetails,
     int? numberOfBags,
     String? bagType,
     String? goodsDescription,
@@ -404,7 +401,6 @@ class Order {
       pickupLocation: pickupLocation ?? this.pickupLocation,
       deliveryLocation: deliveryLocation ?? this.deliveryLocation,
       vehicleNumber: vehicleNumber ?? this.vehicleNumber,
-      invoiceDetails: invoiceDetails ?? this.invoiceDetails,
       numberOfBags: numberOfBags ?? this.numberOfBags,
       bagType: bagType ?? this.bagType,
       goodsDescription: goodsDescription ?? this.goodsDescription,
@@ -441,7 +437,6 @@ class Order {
       pickupLocation: json['pickupLocation'] as String,
       deliveryLocation: json['deliveryLocation'] as String,
       vehicleNumber: json['vehicleNumber'] as String,
-      invoiceDetails: json['invoiceDetails'] as String?,
       numberOfBags: (json['numberOfBags'] as num).toInt(),
       bagType: json['bagType'] as String,
       goodsDescription: json['goodsDescription'] as String?,
@@ -481,7 +476,6 @@ class Order {
         'pickupLocation': pickupLocation,
         'deliveryLocation': deliveryLocation,
         'vehicleNumber': vehicleNumber,
-        if (invoiceDetails != null) 'invoiceDetails': invoiceDetails,
         'numberOfBags': numberOfBags,
         'bagType': bagType,
         if (goodsDescription != null) 'goodsDescription': goodsDescription,

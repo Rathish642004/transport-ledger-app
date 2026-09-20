@@ -195,17 +195,28 @@ class _TabButton extends StatelessWidget {
 }
 
 class _LedgerCard extends StatelessWidget {
-  const _LedgerCard({required this.child});
+  const _LedgerCard({required this.child, this.onTap});
 
   final Widget child;
+
+  /// Opens that party's ledger detail screen — the edit icon and Receive
+  /// Payment button inside [child] are their own tap targets and win the
+  /// gesture arena over this outer one, so they still work independently.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFE2E8F0))),
-      child: child,
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(padding: const EdgeInsets.all(14), child: child),
+        ),
+      ),
     );
   }
 }
@@ -219,6 +230,7 @@ class _CompanyRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _LedgerCard(
+      onTap: () => context.push(AppRoutes.companyLedgerPath(company.id)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -293,6 +305,7 @@ class _CustomerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _LedgerCard(
+      onTap: () => context.push(AppRoutes.customerLedgerPath(customer.id)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

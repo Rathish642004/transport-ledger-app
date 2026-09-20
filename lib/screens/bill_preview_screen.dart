@@ -47,7 +47,7 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
 
   Future<void> _handleShare(Order order, String lrNumber, String lrDate, String consignorName, String? consignorDivision,
       String consignorAddress, String consigneeName, String consigneeAddress, String deliveryAddress, String vehicleNumber,
-      String invoiceDetails, String goodsDescription, int numberOfBags, double ratePerBag, double totalBillAmount,
+      String goodsDescription, int numberOfBags, double ratePerBag, double totalBillAmount,
       String amountInWords) async {
     final format = await showShareFormatDialog(context);
     if (format == null || !mounted) return;
@@ -68,15 +68,17 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
         consigneeAddress: consigneeAddress,
         deliveryAddress: deliveryAddress,
         vehicleNumber: vehicleNumber,
-        invoiceDetails: invoiceDetails,
         goodsDescription: goodsDescription,
         numberOfBags: numberOfBags,
         ratePerBag: ratePerBag,
         totalBillAmount: totalBillAmount,
         amountInWords: amountInWords,
       );
+      // LR numbers like "KST/27/161" contain '/', which the filesystem reads
+      // as a path separator — sanitize before using it in a file name.
+      final safeLrNumber = lrNumber.replaceAll(RegExp(r'[\\/]'), '-');
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/Transport_Bill_$lrNumber.pdf');
+      final file = File('${dir.path}/Transport_Bill_$safeLrNumber.pdf');
       await file.writeAsBytes(bytes);
       await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], subject: 'Transport Bill $lrNumber'));
     } else {
@@ -89,7 +91,7 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
           '${(consignorDivision?.isNotEmpty ?? false) ? '$consignorDivision\n' : ''}$consignorAddress\n\n'
           '*Consignee (To):*\n$consigneeName\n$consigneeAddress\n\n'
           '*Delivery Address:*\n$deliveryAddress\n\n'
-          '*Vehicle No:* $vehicleNumber\n*Invoice Details:* $invoiceDetails\n'
+          '*Vehicle No:* $vehicleNumber\n'
           '*Goods:* $goodsDescription\n*Qty:* $numberOfBags BAGS\n*Rate:* ${ratePerBag.round()}/BAG\n'
           '*Amount:* ₹${totalBillAmount.round()} /-\n*Amount in Words:* $amountInWords\n\n'
           '$bankLines';
@@ -102,7 +104,7 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
 
   Future<void> _handlePrint(String lrNumber, String lrDate, String consignorName, String? consignorDivision,
       String consignorAddress, String consigneeName, String consigneeAddress, String deliveryAddress, String vehicleNumber,
-      String invoiceDetails, String goodsDescription, int numberOfBags, double ratePerBag, double totalBillAmount,
+      String goodsDescription, int numberOfBags, double ratePerBag, double totalBillAmount,
       String amountInWords) async {
     final profile = ref.read(profileProvider);
     final bank = ref.read(banksProvider).firstOrNull;
@@ -120,7 +122,6 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
         consigneeAddress: consigneeAddress,
         deliveryAddress: deliveryAddress,
         vehicleNumber: vehicleNumber,
-        invoiceDetails: invoiceDetails,
         goodsDescription: goodsDescription,
         numberOfBags: numberOfBags,
         ratePerBag: ratePerBag,
@@ -173,7 +174,6 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
     final consigneeAddress = order.consigneeAddress ?? '';
     final deliveryAddress = order.deliveryAddress ?? '';
     final vehicleNumber = order.vehicleNumber;
-    final invoiceDetails = order.invoiceDetails ?? '';
     final goodsDescription = (order.goodsDescription?.isNotEmpty ?? false) ? order.goodsDescription! : order.bagType;
     final numberOfBags = order.numberOfBags > 0 ? order.numberOfBags : 0;
     final ratePerBag = order.ratePerBag ?? (numberOfBags > 0 ? (order.charges.totalCustomerBill / numberOfBags).roundToDouble() : 0);
@@ -189,10 +189,10 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
           viewMode: _viewMode,
           onViewModeChanged: (m) => setState(() => _viewMode = m),
           onShare: () => _handleShare(order!, lrNumber, lrDate, consignorName, consignorDivision, consignorAddress,
-              consigneeName, consigneeAddress, deliveryAddress, vehicleNumber, invoiceDetails, goodsDescription,
+              consigneeName, consigneeAddress, deliveryAddress, vehicleNumber, goodsDescription,
               numberOfBags, ratePerBag, totalBillAmount, amountInWords),
           onPrint: () => _handlePrint(lrNumber, lrDate, consignorName, consignorDivision, consignorAddress,
-              consigneeName, consigneeAddress, deliveryAddress, vehicleNumber, invoiceDetails, goodsDescription,
+              consigneeName, consigneeAddress, deliveryAddress, vehicleNumber, goodsDescription,
               numberOfBags, ratePerBag, totalBillAmount, amountInWords),
         ),
         const SizedBox(height: 12),
@@ -208,7 +208,6 @@ class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
           consigneeAddress: consigneeAddress,
           deliveryAddress: deliveryAddress,
           vehicleNumber: vehicleNumber,
-          invoiceDetails: invoiceDetails,
           goodsDescription: goodsDescription,
           numberOfBags: numberOfBags,
           ratePerBag: ratePerBag,
@@ -338,7 +337,6 @@ class _BillDocument extends StatelessWidget {
     required this.consigneeAddress,
     required this.deliveryAddress,
     required this.vehicleNumber,
-    required this.invoiceDetails,
     required this.goodsDescription,
     required this.numberOfBags,
     required this.ratePerBag,
@@ -357,7 +355,6 @@ class _BillDocument extends StatelessWidget {
   final String consigneeAddress;
   final String deliveryAddress;
   final String vehicleNumber;
-  final String invoiceDetails;
   final String goodsDescription;
   final int numberOfBags;
   final double ratePerBag;
@@ -420,10 +417,20 @@ class _BillDocument extends StatelessWidget {
                       Expanded(
                         child: Container(
                           padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(border: Border(bottom: border)),
+                          decoration: const BoxDecoration(border: Border(right: border, bottom: border)),
                           child: Text.rich(TextSpan(children: [
                             const TextSpan(text: 'DATE: ', style: TextStyle(fontWeight: FontWeight.w600)),
                             TextSpan(text: lrDate, style: const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'monospace')),
+                          ])),
+                        ),
+                      ),
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: const BoxDecoration(border: Border(bottom: border)),
+                          child: Text.rich(TextSpan(children: [
+                            const TextSpan(text: 'VEHICLE NO: ', style: TextStyle(fontWeight: FontWeight.w600)),
+                            TextSpan(text: vehicleNumber, style: const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'monospace')),
                           ])),
                         ),
                       ),
@@ -469,40 +476,15 @@ class _BillDocument extends StatelessWidget {
                     ],
                   ),
                 ),
-                IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(border: Border(bottom: border)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(border: Border(right: border, bottom: border)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Delivery Address', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
-                              Text(deliveryAddress.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                            ],
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(border: Border(bottom: border)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text.rich(TextSpan(children: [
-                                const TextSpan(text: 'VEHICLE NO: ', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
-                                TextSpan(text: vehicleNumber, style: const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'monospace')),
-                              ])),
-                              const SizedBox(height: 8),
-                              Text('INVOICE DETAILS-$invoiceDetails', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10, fontFamily: 'monospace')),
-                            ],
-                          ),
-                        ),
-                      ),
+                      const Text('Delivery Address', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                      Text(deliveryAddress.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                     ],
                   ),
                 ),

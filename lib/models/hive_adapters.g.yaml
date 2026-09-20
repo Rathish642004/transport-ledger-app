@@ -187,8 +187,6 @@ types:
         index: 13
       vehicleNumber:
         index: 14
-      invoiceDetails:
-        index: 15
       numberOfBags:
         index: 18
       bagType:
