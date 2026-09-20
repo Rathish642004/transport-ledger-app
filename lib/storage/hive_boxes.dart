@@ -5,8 +5,6 @@ import '../models/backup_sync_state.dart';
 import '../models/bank_account.dart';
 import '../models/company.dart';
 import '../models/customer.dart';
-import '../models/driver.dart';
-import '../models/driver_payment_record.dart';
 import '../models/expense_record.dart';
 import '../models/hive_registrar.g.dart';
 import '../models/order.dart';
@@ -29,9 +27,7 @@ Future<void> initHive() async {
     Hive.openBox<Order>(StorageKeys.orders),
     Hive.openBox<Company>(StorageKeys.companies),
     Hive.openBox<Customer>(StorageKeys.customers),
-    Hive.openBox<Driver>(StorageKeys.drivers),
     Hive.openBox<PaymentReceipt>(StorageKeys.payments),
-    Hive.openBox<DriverPaymentRecord>(StorageKeys.driverPayments),
     Hive.openBox<ExpenseRecord>(StorageKeys.expenses),
     Hive.openBox<TransporterProfile>(StorageKeys.profile),
     Hive.openBox<BackupSyncState>(StorageKeys.backup),
@@ -39,6 +35,12 @@ Future<void> initHive() async {
     Hive.openBox<List>(StorageKeys.ordersOrder),
     Hive.openBox<List>(StorageKeys.paymentsOrder),
   ]);
+
+  // The driver feature (driver list, driver ledger) was removed — drop any
+  // leftover on-disk data from before that removal. These boxes are never
+  // reopened afterwards.
+  await Hive.deleteBoxFromDisk(StorageKeys.drivers);
+  await Hive.deleteBoxFromDisk(StorageKeys.driverPayments);
 
   // `backupSettings` isn't user data — the app reads it as non-null
   // (`BackupNotifier.build`) and it's just sync bookkeeping, so it must exist
@@ -71,14 +73,8 @@ Future<void> seedIfEmpty() async {
   if (customersBox.isEmpty) {
     await customersBox.putAll({for (final c in initialCustomers) c.id: c});
   }
-  if (driversBox.isEmpty) {
-    await driversBox.putAll({for (final d in initialDrivers) d.id: d});
-  }
   if (paymentsBox.isEmpty) {
     paymentsOrderedIndex.write(initialPaymentReceipts);
-  }
-  if (driverPaymentsBox.isEmpty) {
-    await driverPaymentsBox.putAll({for (final p in initialDriverPayments) p.id: p});
   }
   if (expensesBox.isEmpty) {
     await expensesBox.putAll({for (final e in initialExpenses) e.id: e});
@@ -100,9 +96,7 @@ Future<void> replaceAllFromBackup({
   required List<Order> orders,
   List<Company>? companies,
   List<Customer>? customers,
-  List<Driver>? drivers,
   List<PaymentReceipt>? payments,
-  List<DriverPaymentRecord>? driverPayments,
   List<ExpenseRecord>? expenses,
   TransporterProfile? profile,
   List<BankAccount>? banks,
@@ -118,17 +112,9 @@ Future<void> replaceAllFromBackup({
     await customersBox.clear();
     await customersBox.putAll({for (final c in customers) c.id: c});
   }
-  if (drivers != null) {
-    await driversBox.clear();
-    await driversBox.putAll({for (final d in drivers) d.id: d});
-  }
   if (payments != null) {
     await paymentsOrderedIndex.clear();
     paymentsOrderedIndex.write(payments);
-  }
-  if (driverPayments != null) {
-    await driverPaymentsBox.clear();
-    await driverPaymentsBox.putAll({for (final p in driverPayments) p.id: p});
   }
   if (expenses != null) {
     await expensesBox.clear();
@@ -146,10 +132,7 @@ Future<void> replaceAllFromBackup({
 Box<Order> get ordersBox => Hive.box<Order>(StorageKeys.orders);
 Box<Company> get companiesBox => Hive.box<Company>(StorageKeys.companies);
 Box<Customer> get customersBox => Hive.box<Customer>(StorageKeys.customers);
-Box<Driver> get driversBox => Hive.box<Driver>(StorageKeys.drivers);
 Box<PaymentReceipt> get paymentsBox => Hive.box<PaymentReceipt>(StorageKeys.payments);
-Box<DriverPaymentRecord> get driverPaymentsBox =>
-    Hive.box<DriverPaymentRecord>(StorageKeys.driverPayments);
 Box<ExpenseRecord> get expensesBox => Hive.box<ExpenseRecord>(StorageKeys.expenses);
 Box<TransporterProfile> get profileBox => Hive.box<TransporterProfile>(StorageKeys.profile);
 Box<BackupSyncState> get backupBox => Hive.box<BackupSyncState>(StorageKeys.backup);
@@ -188,15 +171,13 @@ Map<String, dynamic> buildBackupPayload() => {
       'orders': ordersOrderedIndex.read().map((o) => o.toJson()).toList(),
       'companies': companiesBox.values.map((c) => c.toJson()).toList(),
       'customers': customersBox.values.map((c) => c.toJson()).toList(),
-      'drivers': driversBox.values.map((d) => d.toJson()).toList(),
       'payments': paymentsOrderedIndex.read().map((p) => p.toJson()).toList(),
-      'driverPayments': driverPaymentsBox.values.map((p) => p.toJson()).toList(),
       'expenses': expensesBox.values.map((e) => e.toJson()).toList(),
       'banks': banksBox.values.map((b) => b.toJson()).toList(),
     };
 
-/// `orders.length + payments.length + driverPayments.length +
-/// expenses.length`, matching `triggerGoogleDriveBackup`'s
-/// `totalLocalRecordsCount` in `LedgerContext.tsx:874`.
+/// `orders.length + payments.length + expenses.length`, matching
+/// `triggerGoogleDriveBackup`'s `totalLocalRecordsCount` in
+/// `LedgerContext.tsx:874`.
 int totalLocalRecordsCount() =>
-    ordersBox.length + paymentsBox.length + driverPaymentsBox.length + expensesBox.length;
+    ordersBox.length + paymentsBox.length + expensesBox.length;

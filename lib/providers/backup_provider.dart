@@ -11,8 +11,6 @@ import '../models/backup_sync_state.dart';
 import '../models/bank_account.dart';
 import '../models/company.dart';
 import '../models/customer.dart';
-import '../models/driver.dart';
-import '../models/driver_payment_record.dart';
 import '../models/enums.dart';
 import '../models/expense_record.dart';
 import '../models/ledger_transaction.dart';
@@ -28,8 +26,6 @@ import 'all_transactions_provider.dart';
 import 'banks_provider.dart';
 import 'companies_provider.dart';
 import 'customers_provider.dart';
-import 'driver_payments_provider.dart';
-import 'drivers_provider.dart';
 import 'expenses_provider.dart';
 import 'orders_provider.dart';
 import 'payments_provider.dart';
@@ -239,9 +235,7 @@ class BackupNotifier extends Notifier<BackupSyncState> {
     ref.invalidate(ordersProvider);
     ref.invalidate(companiesProvider);
     ref.invalidate(customersProvider);
-    ref.invalidate(driversProvider);
     ref.invalidate(paymentsProvider);
-    ref.invalidate(driverPaymentsProvider);
     ref.invalidate(expensesProvider);
     ref.invalidate(profileProvider);
     ref.invalidate(banksProvider);
@@ -274,9 +268,7 @@ class BackupNotifier extends Notifier<BackupSyncState> {
       orders: rawOrders.map((e) => Order.fromJson(e as Map<String, dynamic>)).toList(),
       companies: mapList('companies', Company.fromJson),
       customers: mapList('customers', Customer.fromJson),
-      drivers: mapList('drivers', Driver.fromJson),
       payments: mapList('payments', PaymentReceipt.fromJson),
-      driverPayments: mapList('driverPayments', DriverPaymentRecord.fromJson),
       expenses: mapList('expenses', ExpenseRecord.fromJson),
       profile: parsed['profile'] != null ? TransporterProfile.fromJson(parsed['profile'] as Map<String, dynamic>) : null,
       banks: mapList('banks', BankAccount.fromJson),

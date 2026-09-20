@@ -1,11 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../domain/payment_allocation_engine.dart';
 import '../models/enums.dart';
 import '../models/order.dart';
 import '../storage/hive_boxes.dart';
-import 'companies_provider.dart';
-import 'customers_provider.dart';
-import 'drivers_provider.dart';
 import 'toast_provider.dart';
 
 const _noteMonths = [
@@ -28,9 +26,12 @@ String _formatNoteTimestamp(DateTime dt) {
   return '$day $month ${dt.year}, $hourStr:$minute $period';
 }
 
-/// Mirrors the order actions in `LedgerContext.tsx:476-596`, plus the
-/// order-side updates from `receivePayment` (:610-632) and `payDriver`
-/// (:677-707), kept here since they mutate this notifier's own state.
+/// Mirrors the order actions in `LedgerContext.tsx:476-596`. The order-side
+/// updates from `receivePayment` are no longer imperative deltas — see
+/// [recomputeFromAllocations], called by `PaymentsNotifier` after every
+/// payment mutation so `amountReceived`/`paymentStatus` are always rebuilt
+/// from the current set of allocations (idempotent, so remove/update/delete
+/// cascades never need undo arithmetic).
 class OrdersNotifier extends Notifier<List<Order>> {
   @override
   List<Order> build() => ordersOrderedIndex.read();
@@ -46,8 +47,7 @@ class OrdersNotifier extends Notifier<List<Order>> {
 
   /// `orderData`'s `id`/`createdAt`/`updatedAt` are placeholders — all three
   /// are overwritten here, matching `Omit<Order, 'id'|'createdAt'|'updatedAt'>`
-  /// in the original. Also fans out the company/customer/driver aggregate
-  /// stat updates `createOrder` does in the source.
+  /// in the original.
   Order createOrder(Order orderData) {
     final now = DateTime.now().toIso8601String();
     final newOrder = orderData.copyWith(
@@ -57,10 +57,6 @@ class OrdersNotifier extends Notifier<List<Order>> {
     );
 
     _commit([newOrder, ...state]);
-
-    ref.read(companiesProvider.notifier).applyOrderCreated(newOrder);
-    ref.read(customersProvider.notifier).applyOrderCreated(newOrder);
-    ref.read(driversProvider.notifier).applyOrderCreated(newOrder);
 
     ref.read(toastProvider.notifier).show('Order #${newOrder.orderNumber} created successfully');
     return newOrder;
@@ -139,87 +135,34 @@ class OrdersNotifier extends Notifier<List<Order>> {
     ref.read(toastProvider.notifier).show('Note added to order');
   }
 
-  /// Order-side update from `receivePayment` (`LedgerContext.tsx:610-632`).
-  void applyPaymentReceived({
-    required String? orderId,
-    required String? orderNumber,
-    required double amountReceived,
-  }) {
+  /// Rewrites `amountReceived`/`paymentStatus` for [orderIds] from
+  /// [totalAllocatedByOrder] (order id → sum of every receipt's allocation to
+  /// it) — always a full recompute, never a delta, so it's safe to call after
+  /// recording, editing, or removing any payment, or after an order's
+  /// allocations are stripped by [deleteOrder]'s caller.
+  void recomputeFromAllocations(Set<String> orderIds, Map<String, double> totalAllocatedByOrder) {
+    if (orderIds.isEmpty) return;
     _commit([
       for (final o in state)
-        if (o.id == orderId || o.orderNumber == orderNumber)
-          _withPaymentApplied(o, amountReceived)
-        else
-          o,
+        if (orderIds.contains(o.id)) _withRecomputedPayment(o, totalAllocatedByOrder[o.id] ?? 0) else o,
     ]);
   }
 
-  Order _withPaymentApplied(Order o, double amountReceived) {
-    final newAmountReceived = o.amountReceived + amountReceived;
-    final totalReceivable =
-        o.billing.netExpectedReceipt != 0 ? o.billing.netExpectedReceipt : o.charges.totalCustomerBill;
+  Order _withRecomputedPayment(Order o, double amountReceived) {
+    final totalReceivable = expectedReceiptFor(o);
 
     PaymentStatus status;
-    if (newAmountReceived >= totalReceivable) {
-      status = PaymentStatus.paid;
-    } else if (newAmountReceived == 0) {
+    if (amountReceived <= 0) {
       status = PaymentStatus.unpaid;
+    } else if (amountReceived >= totalReceivable) {
+      status = PaymentStatus.paid;
     } else {
       status = PaymentStatus.partiallyPaid;
     }
 
     return o.copyWith(
-      amountReceived: newAmountReceived,
+      amountReceived: amountReceived,
       paymentStatus: status,
-      updatedAt: DateTime.now().toIso8601String(),
-    );
-  }
-
-  /// Order-side update from `payDriver` (`LedgerContext.tsx:677-707`).
-  void applyDriverPayment({
-    required String? orderId,
-    required String? orderNumber,
-    required double amountPaid,
-    String? driverBillNumber,
-    String? driverBillDate,
-    String? billAttachmentName,
-  }) {
-    _commit([
-      for (final o in state)
-        if (o.id == orderId || o.orderNumber == orderNumber)
-          _withDriverPaymentApplied(o, amountPaid, driverBillNumber, driverBillDate, billAttachmentName)
-        else
-          o,
-    ]);
-  }
-
-  Order _withDriverPaymentApplied(
-    Order o,
-    double amountPaid,
-    String? driverBillNumber,
-    String? driverBillDate,
-    String? billAttachmentName,
-  ) {
-    final newPaidAmount = o.driverExpense.driverPaidAmount + amountPaid;
-    final agreed = o.driverExpense.driverFreight;
-
-    DriverPaymentStatus status;
-    if (newPaidAmount >= agreed) {
-      status = DriverPaymentStatus.paidInFull;
-    } else if (newPaidAmount > 0) {
-      status = DriverPaymentStatus.advancePaid;
-    } else {
-      status = DriverPaymentStatus.unpaid;
-    }
-
-    return o.copyWith(
-      driverExpense: o.driverExpense.copyWith(
-        driverPaidAmount: newPaidAmount,
-        driverPaymentStatus: status,
-        driverBillNumber: (driverBillNumber == null || driverBillNumber.isEmpty) ? null : driverBillNumber,
-        driverBillDate: (driverBillDate == null || driverBillDate.isEmpty) ? null : driverBillDate,
-        driverBillAttachment: (billAttachmentName == null || billAttachmentName.isEmpty) ? null : billAttachmentName,
-      ),
       updatedAt: DateTime.now().toIso8601String(),
     );
   }

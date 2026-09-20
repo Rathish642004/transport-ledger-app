@@ -104,51 +104,6 @@ class PaymentStatusAdapter extends TypeAdapter<PaymentStatus> {
           typeId == other.typeId;
 }
 
-class DriverPaymentStatusAdapter extends TypeAdapter<DriverPaymentStatus> {
-  @override
-  final typeId = 2;
-
-  @override
-  DriverPaymentStatus read(BinaryReader reader) {
-    switch (reader.readByte()) {
-      case 0:
-        return DriverPaymentStatus.unpaid;
-      case 1:
-        return DriverPaymentStatus.advancePaid;
-      case 2:
-        return DriverPaymentStatus.partiallyPaid;
-      case 3:
-        return DriverPaymentStatus.paidInFull;
-      default:
-        return DriverPaymentStatus.unpaid;
-    }
-  }
-
-  @override
-  void write(BinaryWriter writer, DriverPaymentStatus obj) {
-    switch (obj) {
-      case DriverPaymentStatus.unpaid:
-        writer.writeByte(0);
-      case DriverPaymentStatus.advancePaid:
-        writer.writeByte(1);
-      case DriverPaymentStatus.partiallyPaid:
-        writer.writeByte(2);
-      case DriverPaymentStatus.paidInFull:
-        writer.writeByte(3);
-    }
-  }
-
-  @override
-  int get hashCode => typeId.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DriverPaymentStatusAdapter &&
-          runtimeType == other.runtimeType &&
-          typeId == other.typeId;
-}
-
 class PaymentMethodAdapter extends TypeAdapter<PaymentMethod> {
   @override
   final typeId = 3;
@@ -435,24 +390,13 @@ class OrderChargesAdapter extends TypeAdapter<OrderCharges> {
     final fields = <int, dynamic>{
       for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
-    return OrderCharges(
-      loadingCharges: (fields[0] as num).toDouble(),
-      transportationCharges: (fields[1] as num).toDouble(),
-      otherCharges: (fields[2] as num).toDouble(),
-      totalCustomerBill: (fields[3] as num).toDouble(),
-    );
+    return OrderCharges(totalCustomerBill: (fields[3] as num).toDouble());
   }
 
   @override
   void write(BinaryWriter writer, OrderCharges obj) {
     writer
-      ..writeByte(4)
-      ..writeByte(0)
-      ..write(obj.loadingCharges)
       ..writeByte(1)
-      ..write(obj.transportationCharges)
-      ..writeByte(2)
-      ..write(obj.otherCharges)
       ..writeByte(3)
       ..write(obj.totalCustomerBill);
   }
@@ -464,67 +408,6 @@ class OrderChargesAdapter extends TypeAdapter<OrderCharges> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is OrderChargesAdapter &&
-          runtimeType == other.runtimeType &&
-          typeId == other.typeId;
-}
-
-class DriverExpenseAdapter extends TypeAdapter<DriverExpense> {
-  @override
-  final typeId = 10;
-
-  @override
-  DriverExpense read(BinaryReader reader) {
-    final numOfFields = reader.readByte();
-    final fields = <int, dynamic>{
-      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
-    };
-    return DriverExpense(
-      driverId: fields[0] as String,
-      driverName: fields[1] as String,
-      driverFreight: (fields[2] as num).toDouble(),
-      driverPaidAmount: (fields[3] as num).toDouble(),
-      driverPaymentStatus: fields[4] as DriverPaymentStatus,
-      driverBillNumber: fields[5] as String,
-      driverBillDate: fields[6] as String,
-      driverBillAttachment: fields[7] as String?,
-      additionalLoadingExpense: (fields[8] as num).toDouble(),
-      otherTransportExpense: (fields[9] as num).toDouble(),
-    );
-  }
-
-  @override
-  void write(BinaryWriter writer, DriverExpense obj) {
-    writer
-      ..writeByte(10)
-      ..writeByte(0)
-      ..write(obj.driverId)
-      ..writeByte(1)
-      ..write(obj.driverName)
-      ..writeByte(2)
-      ..write(obj.driverFreight)
-      ..writeByte(3)
-      ..write(obj.driverPaidAmount)
-      ..writeByte(4)
-      ..write(obj.driverPaymentStatus)
-      ..writeByte(5)
-      ..write(obj.driverBillNumber)
-      ..writeByte(6)
-      ..write(obj.driverBillDate)
-      ..writeByte(7)
-      ..write(obj.driverBillAttachment)
-      ..writeByte(8)
-      ..write(obj.additionalLoadingExpense)
-      ..writeByte(9)
-      ..write(obj.otherTransportExpense);
-  }
-
-  @override
-  int get hashCode => typeId.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DriverExpenseAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
 }
@@ -605,8 +488,7 @@ class FinancialSummaryAdapter extends TypeAdapter<FinancialSummary> {
     };
     return FinancialSummary(
       grossBill: (fields[0] as num).toDouble(),
-      driverExpenseTotal: (fields[1] as num).toDouble(),
-      otherExpenseTotal: (fields[2] as num).toDouble(),
+      totalExpenses: (fields[6] as num).toDouble(),
       expectedTds: (fields[3] as num).toDouble(),
       expectedNetReceipt: (fields[4] as num).toDouble(),
       estimatedProfit: (fields[5] as num).toDouble(),
@@ -616,19 +498,17 @@ class FinancialSummaryAdapter extends TypeAdapter<FinancialSummary> {
   @override
   void write(BinaryWriter writer, FinancialSummary obj) {
     writer
-      ..writeByte(6)
+      ..writeByte(5)
       ..writeByte(0)
       ..write(obj.grossBill)
-      ..writeByte(1)
-      ..write(obj.driverExpenseTotal)
-      ..writeByte(2)
-      ..write(obj.otherExpenseTotal)
       ..writeByte(3)
       ..write(obj.expectedTds)
       ..writeByte(4)
       ..write(obj.expectedNetReceipt)
       ..writeByte(5)
-      ..write(obj.estimatedProfit);
+      ..write(obj.estimatedProfit)
+      ..writeByte(6)
+      ..write(obj.totalExpenses);
   }
 
   @override
@@ -669,8 +549,6 @@ class OrderAdapter extends TypeAdapter<Order> {
       deliveryLocation: fields[13] as String,
       vehicleNumber: fields[14] as String,
       invoiceDetails: fields[15] as String?,
-      driverId: fields[16] as String,
-      driverName: fields[17] as String,
       numberOfBags: (fields[18] as num).toInt(),
       bagType: fields[19] as String,
       goodsDescription: fields[20] as String?,
@@ -684,7 +562,7 @@ class OrderAdapter extends TypeAdapter<Order> {
       paymentStatus: fields[26] as PaymentStatus,
       amountReceived: (fields[27] as num).toDouble(),
       charges: fields[28] as OrderCharges,
-      driverExpense: fields[29] as DriverExpense,
+      expenses: fields[34] as OrderExpenses?,
       billing: fields[30] as BillingDetails,
       financialSummary: fields[31] as FinancialSummary,
       createdAt: fields[32] as String,
@@ -695,7 +573,7 @@ class OrderAdapter extends TypeAdapter<Order> {
   @override
   void write(BinaryWriter writer, Order obj) {
     writer
-      ..writeByte(34)
+      ..writeByte(32)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -728,10 +606,6 @@ class OrderAdapter extends TypeAdapter<Order> {
       ..write(obj.vehicleNumber)
       ..writeByte(15)
       ..write(obj.invoiceDetails)
-      ..writeByte(16)
-      ..write(obj.driverId)
-      ..writeByte(17)
-      ..write(obj.driverName)
       ..writeByte(18)
       ..write(obj.numberOfBags)
       ..writeByte(19)
@@ -754,8 +628,6 @@ class OrderAdapter extends TypeAdapter<Order> {
       ..write(obj.amountReceived)
       ..writeByte(28)
       ..write(obj.charges)
-      ..writeByte(29)
-      ..write(obj.driverExpense)
       ..writeByte(30)
       ..write(obj.billing)
       ..writeByte(31)
@@ -763,7 +635,9 @@ class OrderAdapter extends TypeAdapter<Order> {
       ..writeByte(32)
       ..write(obj.createdAt)
       ..writeByte(33)
-      ..write(obj.updatedAt);
+      ..write(obj.updatedAt)
+      ..writeByte(34)
+      ..write(obj.expenses);
   }
 
   @override
@@ -797,18 +671,15 @@ class CompanyAdapter extends TypeAdapter<Company> {
       city: fields[6] as String,
       gstin: fields[7] as String?,
       pan: fields[8] as String?,
-      totalOrders: (fields[9] as num).toInt(),
-      totalBagsDispatched: (fields[10] as num).toInt(),
-      totalBilled: (fields[11] as num).toDouble(),
-      totalReceived: (fields[12] as num).toDouble(),
-      outstandingBalance: (fields[13] as num).toDouble(),
+      tdsApplicable: fields[14] as bool?,
+      tdsPercentage: (fields[15] as num?)?.toDouble(),
     );
   }
 
   @override
   void write(BinaryWriter writer, Company obj) {
     writer
-      ..writeByte(14)
+      ..writeByte(11)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -827,16 +698,10 @@ class CompanyAdapter extends TypeAdapter<Company> {
       ..write(obj.gstin)
       ..writeByte(8)
       ..write(obj.pan)
-      ..writeByte(9)
-      ..write(obj.totalOrders)
-      ..writeByte(10)
-      ..write(obj.totalBagsDispatched)
-      ..writeByte(11)
-      ..write(obj.totalBilled)
-      ..writeByte(12)
-      ..write(obj.totalReceived)
-      ..writeByte(13)
-      ..write(obj.outstandingBalance);
+      ..writeByte(14)
+      ..write(obj.tdsApplicable)
+      ..writeByte(15)
+      ..write(obj.tdsPercentage);
   }
 
   @override
@@ -870,18 +735,15 @@ class CustomerAdapter extends TypeAdapter<Customer> {
       city: fields[6] as String,
       gstin: fields[7] as String?,
       pan: fields[8] as String?,
-      totalOrders: (fields[9] as num).toInt(),
-      totalBagsReceived: (fields[10] as num).toInt(),
-      totalBilled: (fields[11] as num).toDouble(),
-      totalReceived: (fields[12] as num).toDouble(),
-      outstandingBalance: (fields[13] as num).toDouble(),
+      tdsApplicable: fields[14] as bool?,
+      tdsPercentage: (fields[15] as num?)?.toDouble(),
     );
   }
 
   @override
   void write(BinaryWriter writer, Customer obj) {
     writer
-      ..writeByte(14)
+      ..writeByte(11)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -900,16 +762,10 @@ class CustomerAdapter extends TypeAdapter<Customer> {
       ..write(obj.gstin)
       ..writeByte(8)
       ..write(obj.pan)
-      ..writeByte(9)
-      ..write(obj.totalOrders)
-      ..writeByte(10)
-      ..write(obj.totalBagsReceived)
-      ..writeByte(11)
-      ..write(obj.totalBilled)
-      ..writeByte(12)
-      ..write(obj.totalReceived)
-      ..writeByte(13)
-      ..write(obj.outstandingBalance);
+      ..writeByte(14)
+      ..write(obj.tdsApplicable)
+      ..writeByte(15)
+      ..write(obj.tdsPercentage);
   }
 
   @override
@@ -919,74 +775,6 @@ class CustomerAdapter extends TypeAdapter<Customer> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is CustomerAdapter &&
-          runtimeType == other.runtimeType &&
-          typeId == other.typeId;
-}
-
-class DriverAdapter extends TypeAdapter<Driver> {
-  @override
-  final typeId = 16;
-
-  @override
-  Driver read(BinaryReader reader) {
-    final numOfFields = reader.readByte();
-    final fields = <int, dynamic>{
-      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
-    };
-    return Driver(
-      id: fields[0] as String,
-      name: fields[1] as String,
-      phone: fields[2] as String,
-      vehicleNumber: fields[3] as String,
-      licenseNumber: fields[4] as String?,
-      totalTrips: (fields[5] as num).toInt(),
-      totalAgreedFreight: (fields[6] as num).toDouble(),
-      totalAmountPaid: (fields[7] as num).toDouble(),
-      outstandingAmount: (fields[8] as num).toDouble(),
-      payoutAccounts: fields[9] == null
-          ? const []
-          : (fields[9] as List).cast<DriverPayoutAccount>(),
-      additionalVehicleNumbers: fields[10] == null
-          ? const []
-          : (fields[10] as List).cast<String>(),
-    );
-  }
-
-  @override
-  void write(BinaryWriter writer, Driver obj) {
-    writer
-      ..writeByte(11)
-      ..writeByte(0)
-      ..write(obj.id)
-      ..writeByte(1)
-      ..write(obj.name)
-      ..writeByte(2)
-      ..write(obj.phone)
-      ..writeByte(3)
-      ..write(obj.vehicleNumber)
-      ..writeByte(4)
-      ..write(obj.licenseNumber)
-      ..writeByte(5)
-      ..write(obj.totalTrips)
-      ..writeByte(6)
-      ..write(obj.totalAgreedFreight)
-      ..writeByte(7)
-      ..write(obj.totalAmountPaid)
-      ..writeByte(8)
-      ..write(obj.outstandingAmount)
-      ..writeByte(9)
-      ..write(obj.payoutAccounts)
-      ..writeByte(10)
-      ..write(obj.additionalVehicleNumbers);
-  }
-
-  @override
-  int get hashCode => typeId.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DriverAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
 }
@@ -1004,8 +792,9 @@ class PaymentReceiptAdapter extends TypeAdapter<PaymentReceipt> {
     return PaymentReceipt(
       id: fields[0] as String,
       receiptNumber: fields[1] as String,
-      orderId: fields[2] as String,
-      orderNumber: fields[3] as String,
+      partyId: fields[15] as String?,
+      orderId: fields[2] as String?,
+      orderNumber: fields[3] as String?,
       payerType: fields[4] as PayerType,
       payerName: fields[5] as String,
       amountReceived: (fields[6] as num).toDouble(),
@@ -1017,13 +806,16 @@ class PaymentReceiptAdapter extends TypeAdapter<PaymentReceipt> {
       notes: fields[12] as String,
       recordedAt: fields[13] as String,
       bankAccountId: fields[14] as String?,
+      allocations: fields[16] == null
+          ? const []
+          : (fields[16] as List).cast<PaymentAllocation>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, PaymentReceipt obj) {
     writer
-      ..writeByte(15)
+      ..writeByte(17)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -1053,7 +845,11 @@ class PaymentReceiptAdapter extends TypeAdapter<PaymentReceipt> {
       ..writeByte(13)
       ..write(obj.recordedAt)
       ..writeByte(14)
-      ..write(obj.bankAccountId);
+      ..write(obj.bankAccountId)
+      ..writeByte(15)
+      ..write(obj.partyId)
+      ..writeByte(16)
+      ..write(obj.allocations);
   }
 
   @override
@@ -1063,91 +859,6 @@ class PaymentReceiptAdapter extends TypeAdapter<PaymentReceipt> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is PaymentReceiptAdapter &&
-          runtimeType == other.runtimeType &&
-          typeId == other.typeId;
-}
-
-class DriverPaymentRecordAdapter extends TypeAdapter<DriverPaymentRecord> {
-  @override
-  final typeId = 18;
-
-  @override
-  DriverPaymentRecord read(BinaryReader reader) {
-    final numOfFields = reader.readByte();
-    final fields = <int, dynamic>{
-      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
-    };
-    return DriverPaymentRecord(
-      id: fields[0] as String,
-      voucherNumber: fields[1] as String,
-      driverId: fields[2] as String,
-      driverName: fields[3] as String,
-      orderId: fields[4] as String,
-      orderNumber: fields[5] as String,
-      driverBillNumber: fields[6] as String,
-      driverBillDate: fields[7] as String,
-      agreedFreight: (fields[8] as num).toDouble(),
-      amountPaid: (fields[9] as num).toDouble(),
-      paymentDate: fields[10] as String,
-      paymentMethod: fields[11] as PaymentMethod,
-      referenceNumber: fields[12] as String,
-      notes: fields[13] as String,
-      billAttachmentName: fields[14] as String?,
-      recordedAt: fields[15] as String,
-      bankAccountId: fields[16] as String?,
-      driverPayoutAccountId: fields[17] as String?,
-    );
-  }
-
-  @override
-  void write(BinaryWriter writer, DriverPaymentRecord obj) {
-    writer
-      ..writeByte(18)
-      ..writeByte(0)
-      ..write(obj.id)
-      ..writeByte(1)
-      ..write(obj.voucherNumber)
-      ..writeByte(2)
-      ..write(obj.driverId)
-      ..writeByte(3)
-      ..write(obj.driverName)
-      ..writeByte(4)
-      ..write(obj.orderId)
-      ..writeByte(5)
-      ..write(obj.orderNumber)
-      ..writeByte(6)
-      ..write(obj.driverBillNumber)
-      ..writeByte(7)
-      ..write(obj.driverBillDate)
-      ..writeByte(8)
-      ..write(obj.agreedFreight)
-      ..writeByte(9)
-      ..write(obj.amountPaid)
-      ..writeByte(10)
-      ..write(obj.paymentDate)
-      ..writeByte(11)
-      ..write(obj.paymentMethod)
-      ..writeByte(12)
-      ..write(obj.referenceNumber)
-      ..writeByte(13)
-      ..write(obj.notes)
-      ..writeByte(14)
-      ..write(obj.billAttachmentName)
-      ..writeByte(15)
-      ..write(obj.recordedAt)
-      ..writeByte(16)
-      ..write(obj.bankAccountId)
-      ..writeByte(17)
-      ..write(obj.driverPayoutAccountId);
-  }
-
-  @override
-  int get hashCode => typeId.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DriverPaymentRecordAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
 }
@@ -1411,42 +1122,33 @@ class BankAccountAdapter extends TypeAdapter<BankAccount> {
           typeId == other.typeId;
 }
 
-class DriverPayoutAccountAdapter extends TypeAdapter<DriverPayoutAccount> {
+class OrderExpensesAdapter extends TypeAdapter<OrderExpenses> {
   @override
-  final typeId = 23;
+  final typeId = 24;
 
   @override
-  DriverPayoutAccount read(BinaryReader reader) {
+  OrderExpenses read(BinaryReader reader) {
     final numOfFields = reader.readByte();
     final fields = <int, dynamic>{
       for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
-    return DriverPayoutAccount(
-      id: fields[0] as String,
-      label: fields[1] as String,
-      bankName: fields[2] as String?,
-      accountNumber: fields[3] as String?,
-      ifscCode: fields[4] as String?,
-      upiId: fields[5] as String?,
+    return OrderExpenses(
+      loadingCharges: (fields[0] as num).toDouble(),
+      transportationCharges: (fields[1] as num).toDouble(),
+      otherCharges: (fields[2] as num).toDouble(),
     );
   }
 
   @override
-  void write(BinaryWriter writer, DriverPayoutAccount obj) {
+  void write(BinaryWriter writer, OrderExpenses obj) {
     writer
-      ..writeByte(6)
-      ..writeByte(0)
-      ..write(obj.id)
-      ..writeByte(1)
-      ..write(obj.label)
-      ..writeByte(2)
-      ..write(obj.bankName)
       ..writeByte(3)
-      ..write(obj.accountNumber)
-      ..writeByte(4)
-      ..write(obj.ifscCode)
-      ..writeByte(5)
-      ..write(obj.upiId);
+      ..writeByte(0)
+      ..write(obj.loadingCharges)
+      ..writeByte(1)
+      ..write(obj.transportationCharges)
+      ..writeByte(2)
+      ..write(obj.otherCharges);
   }
 
   @override
@@ -1455,7 +1157,50 @@ class DriverPayoutAccountAdapter extends TypeAdapter<DriverPayoutAccount> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is DriverPayoutAccountAdapter &&
+      other is OrderExpensesAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
+}
+
+class PaymentAllocationAdapter extends TypeAdapter<PaymentAllocation> {
+  @override
+  final typeId = 25;
+
+  @override
+  PaymentAllocation read(BinaryReader reader) {
+    final numOfFields = reader.readByte();
+    final fields = <int, dynamic>{
+      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
+    };
+    return PaymentAllocation(
+      orderId: fields[0] as String,
+      orderNumber: fields[1] as String,
+      amount: (fields[2] as num).toDouble(),
+      tdsSettled: (fields[3] as num).toDouble(),
+    );
+  }
+
+  @override
+  void write(BinaryWriter writer, PaymentAllocation obj) {
+    writer
+      ..writeByte(4)
+      ..writeByte(0)
+      ..write(obj.orderId)
+      ..writeByte(1)
+      ..write(obj.orderNumber)
+      ..writeByte(2)
+      ..write(obj.amount)
+      ..writeByte(3)
+      ..write(obj.tdsSettled);
+  }
+
+  @override
+  int get hashCode => typeId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PaymentAllocationAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
 }

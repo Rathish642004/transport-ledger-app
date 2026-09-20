@@ -45,7 +45,6 @@ class AppShell extends ConsumerWidget {
       case AppRoutes.settings:
       case AppRoutes.companies:
       case AppRoutes.customers:
-      case AppRoutes.drivers:
       case AppRoutes.banks:
         return NavigationTab.more;
       default:

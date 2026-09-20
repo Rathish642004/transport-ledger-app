@@ -9,7 +9,6 @@ import 'package:flutter_app/storage/ordered_box.dart';
 
 Company _c(String id) => Company(
       id: id, name: id, contactPerson: 'x', phone: '0', address: 'x', city: 'x',
-      totalOrders: 0, totalBagsDispatched: 0, totalBilled: 0, totalReceived: 0, outstandingBalance: 0,
     );
 
 void main() {

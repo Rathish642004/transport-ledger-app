@@ -4,34 +4,27 @@ import 'package:go_router/go_router.dart';
 
 import '../models/company.dart';
 import '../models/customer.dart';
-import '../models/driver.dart';
 import '../models/enums.dart';
+import '../models/party_ledger.dart';
 import '../providers/companies_provider.dart';
 import '../providers/customers_provider.dart';
-import '../providers/driver_payments_provider.dart';
-import '../providers/drivers_provider.dart';
 import '../providers/expenses_provider.dart';
-import '../providers/orders_provider.dart';
+import '../providers/party_ledger_provider.dart';
 import '../providers/payments_provider.dart';
 import '../router/app_router.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_list_panel.dart';
 
-enum _LedgerTab { companies, customers, drivers, cashbook }
+enum _LedgerTab { companies, customers, cashbook }
 
-/// Ported from `src/screens/LedgerScreen.tsx`.
-///
-/// The source's cash-book builder reads `ex.expenseDate`/`ex.description` on
-/// `ExpenseRecord` — fields that don't actually exist on that type (see the
-/// same mismatch noted in `ExpenseEntryScreen`, which is what actually
-/// writes those records using the real `date`/`notes` fields). Using the
-/// real field names here instead of reproducing broken date-sorting.
+/// Ported from `src/screens/LedgerScreen.tsx`. Party balances are read from
+/// [partyLedgerProvider] — the single place the `billPayer` rule lives —
+/// rather than recomputed per-row here, which used to double-count a
+/// customer-billed order's receivable onto the company card too (every
+/// order carries both a `companyId` and a `customerId`).
 class LedgerScreen extends ConsumerStatefulWidget {
   const LedgerScreen({super.key, this.initialTab});
 
-  /// `?tab=drivers` (see `app_router.dart`) — e.g. the Dashboard's "Driver
-  /// Payable" tile jumps straight to the Drivers tab instead of landing on
-  /// Companies and making the user switch tabs themselves.
   final String? initialTab;
 
   @override
@@ -49,7 +42,6 @@ class _LedgerScreenState extends ConsumerState<LedgerScreen> {
     _activeTab = switch (widget.initialTab) {
       'companies' => _LedgerTab.companies,
       'customers' => _LedgerTab.customers,
-      'drivers' => _LedgerTab.drivers,
       'cashbook' => _LedgerTab.cashbook,
       _ => _LedgerTab.companies,
     };
@@ -63,12 +55,10 @@ class _LedgerScreenState extends ConsumerState<LedgerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final orders = ref.watch(ordersProvider);
     final companies = ref.watch(companiesProvider);
     final customers = ref.watch(customersProvider);
-    final drivers = ref.watch(driversProvider);
+    final ledgers = ref.watch(partyLedgerProvider);
     final payments = ref.watch(paymentsProvider);
-    final driverPayments = ref.watch(driverPaymentsProvider);
     final expenses = ref.watch(expensesProvider);
     final q = _search.toLowerCase();
 
@@ -76,15 +66,12 @@ class _LedgerScreenState extends ConsumerState<LedgerScreen> {
     switch (_activeTab) {
       case _LedgerTab.companies:
         final rows = companies.where((c) => c.name.toLowerCase().contains(q) || c.city.toLowerCase().contains(q));
-        body = Column(children: [for (final c in rows) _CompanyRow(company: c, orders: orders)]);
+        body = Column(children: [for (final c in rows) _CompanyRow(company: c, ledger: ledgerFor(ledgers, PayerType.company, c.id))]);
       case _LedgerTab.customers:
         final rows = customers.where((c) => c.name.toLowerCase().contains(q) || c.city.toLowerCase().contains(q));
-        body = Column(children: [for (final c in rows) _CustomerRow(customer: c, orders: orders)]);
-      case _LedgerTab.drivers:
-        final rows = drivers.where((d) => d.name.toLowerCase().contains(q) || d.vehicleNumber.toLowerCase().contains(q));
-        body = Column(children: [for (final d in rows) _DriverRow(driver: d, orders: orders)]);
+        body = Column(children: [for (final c in rows) _CustomerRow(customer: c, ledger: ledgerFor(ledgers, PayerType.customer, c.id))]);
       case _LedgerTab.cashbook:
-        final entries = _buildCashbook(payments, driverPayments, expenses);
+        final entries = _buildCashbook(payments, expenses);
         body = TransactionListPanel(entries: entries);
     }
 
@@ -108,14 +95,12 @@ class _LedgerScreenState extends ConsumerState<LedgerScreen> {
                 onPressed: () => switch (_activeTab) {
                   _LedgerTab.companies => context.push(AppRoutes.companiesEdit),
                   _LedgerTab.customers => context.push(AppRoutes.customersEdit),
-                  _LedgerTab.drivers => context.push(AppRoutes.driversEdit),
                   _LedgerTab.cashbook => null,
                 },
                 icon: const Icon(Icons.add, size: 14),
                 label: Text('Add ${switch (_activeTab) {
                   _LedgerTab.companies => 'Company',
                   _LedgerTab.customers => 'Customer',
-                  _LedgerTab.drivers => 'Driver',
                   _LedgerTab.cashbook => '',
                 }}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
               ),
@@ -129,7 +114,6 @@ class _LedgerScreenState extends ConsumerState<LedgerScreen> {
             children: [
               Expanded(child: _TabButton(label: 'Company', selected: _activeTab == _LedgerTab.companies, onTap: () => setState(() => _activeTab = _LedgerTab.companies))),
               Expanded(child: _TabButton(label: 'Customer', selected: _activeTab == _LedgerTab.customers, onTap: () => setState(() => _activeTab = _LedgerTab.customers))),
-              Expanded(child: _TabButton(label: 'Drivers', selected: _activeTab == _LedgerTab.drivers, onTap: () => setState(() => _activeTab = _LedgerTab.drivers))),
               Expanded(child: _TabButton(label: 'Cash Book', selected: _activeTab == _LedgerTab.cashbook, onTap: () => setState(() => _activeTab = _LedgerTab.cashbook))),
             ],
           ),
@@ -154,32 +138,20 @@ class _LedgerScreenState extends ConsumerState<LedgerScreen> {
     );
   }
 
-  List<TransactionEntry> _buildCashbook(List<dynamic> payments, List<dynamic> driverPayments, List<dynamic> expenses) {
+  List<TransactionEntry> _buildCashbook(List<dynamic> payments, List<dynamic> expenses) {
     final list = <TransactionEntry>[];
     for (final p in payments) {
+      final allocations = p.allocations as List<dynamic>;
       list.add(TransactionEntry(
         id: p.id as String,
         date: p.paymentDate as String,
         title: 'Payment Received (${(p.payerType as PayerType).jsonValue})',
-        subtitle: 'Order #${p.orderNumber} • ${p.receiptNumber}',
+        subtitle: allocations.isEmpty ? p.receiptNumber as String : '${allocations.map((a) => a.orderNumber).join(', ')} • ${p.receiptNumber}',
         party: p.payerName as String,
         isInflow: true,
         amount: p.amountReceived as double,
         method: (p.paymentMethod as PaymentMethod).jsonValue,
         ref: p.referenceNumber as String,
-      ));
-    }
-    for (final dp in driverPayments) {
-      list.add(TransactionEntry(
-        id: dp.id as String,
-        date: dp.paymentDate as String,
-        title: 'Driver Freight Paid',
-        subtitle: 'Order #${dp.orderNumber} • ${dp.driverBillNumber}',
-        party: dp.driverName as String,
-        isInflow: false,
-        amount: dp.amountPaid as double,
-        method: (dp.paymentMethod as PaymentMethod).jsonValue,
-        ref: dp.referenceNumber as String,
       ));
     }
     for (final ex in expenses) {
@@ -238,27 +210,14 @@ class _LedgerCard extends StatelessWidget {
   }
 }
 
-class _CompanyRow extends ConsumerWidget {
-  const _CompanyRow({required this.company, required this.orders});
+class _CompanyRow extends StatelessWidget {
+  const _CompanyRow({required this.company, required this.ledger});
 
   final Company company;
-  final List<dynamic> orders;
+  final PartyLedger ledger;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final compOrders = orders.where((o) => o.companyId == company.id || o.companyName == company.name);
-    var totalBilled = 0.0, totalTds = 0.0, totalReceived = 0.0, netExpected = 0.0;
-    var count = 0;
-    for (final o in compOrders) {
-      count++;
-      totalBilled += o.charges.totalCustomerBill as double;
-      totalTds += o.billing.tdsAmount as double;
-      totalReceived += o.amountReceived as double;
-      final net = o.billing.netExpectedReceipt as double;
-      netExpected += net != 0 ? net : o.charges.totalCustomerBill as double;
-    }
-    final balance = (netExpected - totalReceived).clamp(0, double.infinity);
-
+  Widget build(BuildContext context) {
     return _LedgerCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,7 +230,7 @@ class _CompanyRow extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(company.name, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-                    Text('${company.city} • $count Orders', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                    Text(company.city, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                   ],
                 ),
               ),
@@ -279,7 +238,7 @@ class _CompanyRow extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   const Text('RECEIVABLE DUE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8))),
-                  Text(formatINR(balance), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: balance > 0 ? const Color(0xFFBE123C) : const Color(0xFF047857))),
+                  Text(formatINR(ledger.outstanding), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: ledger.outstanding > 0 ? const Color(0xFFBE123C) : const Color(0xFF047857))),
                 ],
               ),
               InkWell(
@@ -298,13 +257,17 @@ class _CompanyRow extends ConsumerWidget {
             decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12)),
             child: Row(
               children: [
-                Expanded(child: _MiniStat('Total Billed', formatINR(totalBilled), const Color(0xFF1E293B))),
-                Expanded(child: _MiniStat('TDS Deducted', formatINR(totalTds), const Color(0xFFB45309))),
-                Expanded(child: _MiniStat('Recv Cash', formatINR(totalReceived), const Color(0xFF047857))),
+                Expanded(child: _MiniStat('Total Billed', formatINR(ledger.totalBilled), const Color(0xFF1E293B))),
+                Expanded(child: _MiniStat('TDS Withheld', formatINR(ledger.tdsWithheldTotal), const Color(0xFFB45309))),
+                Expanded(child: _MiniStat('Recv Cash', formatINR(ledger.received), const Color(0xFF047857))),
               ],
             ),
           ),
-          if (balance > 0) ...[
+          if (ledger.unallocatedCredit > 0) ...[
+            const SizedBox(height: 6),
+            Text('Unallocated credit: ${formatINR(ledger.unallocatedCredit)}', style: const TextStyle(fontSize: 10, color: Color(0xFF1D4ED8), fontWeight: FontWeight.bold)),
+          ],
+          if (ledger.outstanding > 0 || ledger.unallocatedCredit > 0) ...[
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
@@ -321,27 +284,14 @@ class _CompanyRow extends ConsumerWidget {
   }
 }
 
-class _CustomerRow extends ConsumerWidget {
-  const _CustomerRow({required this.customer, required this.orders});
+class _CustomerRow extends StatelessWidget {
+  const _CustomerRow({required this.customer, required this.ledger});
 
   final Customer customer;
-  final List<dynamic> orders;
+  final PartyLedger ledger;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final custOrders = orders.where((o) => o.customerId == customer.id || o.customerName == customer.name);
-    var totalBilled = 0.0, totalTds = 0.0, totalReceived = 0.0, netExpected = 0.0;
-    var count = 0;
-    for (final o in custOrders) {
-      count++;
-      totalBilled += o.charges.totalCustomerBill as double;
-      totalTds += o.billing.tdsAmount as double;
-      totalReceived += o.amountReceived as double;
-      final net = o.billing.netExpectedReceipt as double;
-      netExpected += net != 0 ? net : o.charges.totalCustomerBill as double;
-    }
-    final balance = (netExpected - totalReceived).clamp(0, double.infinity);
-
+  Widget build(BuildContext context) {
     return _LedgerCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -354,7 +304,7 @@ class _CustomerRow extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(customer.name, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-                    Text('${customer.city} • $count Orders', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                    Text(customer.city, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                   ],
                 ),
               ),
@@ -362,7 +312,7 @@ class _CustomerRow extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   const Text('RECEIVABLE DUE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8))),
-                  Text(formatINR(balance), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: balance > 0 ? const Color(0xFFBE123C) : const Color(0xFF047857))),
+                  Text(formatINR(ledger.outstanding), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: ledger.outstanding > 0 ? const Color(0xFFBE123C) : const Color(0xFF047857))),
                 ],
               ),
               InkWell(
@@ -381,13 +331,17 @@ class _CustomerRow extends ConsumerWidget {
             decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12)),
             child: Row(
               children: [
-                Expanded(child: _MiniStat('Total Billed', formatINR(totalBilled), const Color(0xFF1E293B))),
-                Expanded(child: _MiniStat('TDS Deducted', formatINR(totalTds), const Color(0xFFB45309))),
-                Expanded(child: _MiniStat('Recv Cash', formatINR(totalReceived), const Color(0xFF047857))),
+                Expanded(child: _MiniStat('Total Billed', formatINR(ledger.totalBilled), const Color(0xFF1E293B))),
+                Expanded(child: _MiniStat('TDS Withheld', formatINR(ledger.tdsWithheldTotal), const Color(0xFFB45309))),
+                Expanded(child: _MiniStat('Recv Cash', formatINR(ledger.received), const Color(0xFF047857))),
               ],
             ),
           ),
-          if (balance > 0) ...[
+          if (ledger.unallocatedCredit > 0) ...[
+            const SizedBox(height: 6),
+            Text('Unallocated credit: ${formatINR(ledger.unallocatedCredit)}', style: const TextStyle(fontSize: 10, color: Color(0xFF1D4ED8), fontWeight: FontWeight.bold)),
+          ],
+          if (ledger.outstanding > 0 || ledger.unallocatedCredit > 0) ...[
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
@@ -395,95 +349,6 @@ class _CustomerRow extends ConsumerWidget {
                 style: FilledButton.styleFrom(backgroundColor: const Color(0xFF059669), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
                 onPressed: () => context.push('${AppRoutes.receivePayment}?partyType=Customer&partyId=${customer.id}'),
                 child: const Text('Receive Payment', style: TextStyle(fontSize: 11)),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _DriverRow extends ConsumerWidget {
-  const _DriverRow({required this.driver, required this.orders});
-
-  final Driver driver;
-  final List<dynamic> orders;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final drvOrders = orders.where((o) => o.driverId == driver.id || o.driverName == driver.name);
-    var totalAgreed = 0.0, totalPaid = 0.0;
-    var count = 0;
-    for (final o in drvOrders) {
-      count++;
-      totalAgreed += o.driverExpense.driverFreight as double;
-      totalPaid += o.driverExpense.driverPaidAmount as double;
-    }
-    final balance = (totalAgreed - totalPaid).clamp(0, double.infinity);
-
-    return _LedgerCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(driver.name, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                          decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(6)),
-                          child: Text(driver.vehicleNumber, style: const TextStyle(fontSize: 9, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
-                        ),
-                      ],
-                    ),
-                    Text('$count Trips Driven', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Text('PAYABLE BALANCE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8))),
-                  Text(formatINR(balance), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: balance > 0 ? const Color(0xFFBE123C) : const Color(0xFF047857))),
-                ],
-              ),
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: () => context.push('${AppRoutes.driversEdit}?id=${driver.id}'),
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 8),
-                  child: Icon(Icons.edit_outlined, size: 16, color: Colors.grey.shade500),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12)),
-            child: Row(
-              children: [
-                Expanded(child: _MiniStat('Total Agreed Freight', formatINR(totalAgreed), const Color(0xFF1E293B))),
-                Expanded(child: _MiniStat('Total Disbursed', formatINR(totalPaid), const Color(0xFF047857))),
-              ],
-            ),
-          ),
-          if (balance > 0) ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: const Color(0xFFD97706), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
-                onPressed: () => context.push('${AppRoutes.payDriver}?driverId=${driver.id}'),
-                child: const Text('Pay Freight', style: TextStyle(fontSize: 11)),
               ),
             ),
           ],
@@ -511,4 +376,3 @@ class _MiniStat extends StatelessWidget {
     );
   }
 }
-

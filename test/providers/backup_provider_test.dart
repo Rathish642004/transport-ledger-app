@@ -101,7 +101,7 @@ void main() {
 
       final state = container.read(backupProvider);
       expect(state.syncStatus, SyncStatus.synced);
-      expect(state.totalLocalRecordsCount, 5 + 3 + 4 + 5); // orders + payments + driverPayments + expenses
+      expect(state.totalLocalRecordsCount, 5 + 3 + 5); // orders + payments + expenses
       expect(state.lastBackupDate, isNotNull);
 
       final uploaded = jsonDecode(fakeDrive.storedBackup!) as Map<String, dynamic>;

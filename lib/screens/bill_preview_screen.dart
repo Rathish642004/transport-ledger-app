@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -16,6 +19,7 @@ import '../services/bill_pdf.dart';
 import '../utils/formatters.dart';
 import '../widgets/delete_order_dialog.dart';
 import '../widgets/order_notes_dialog.dart';
+import '../widgets/share_format_dialog.dart';
 import '../widgets/status_badge.dart';
 
 /// Ported from `src/screens/BillPreviewScreen.tsx`. The hand-drawn truck SVG
@@ -41,26 +45,58 @@ enum _ViewMode { standard, detailed }
 class _BillPreviewScreenState extends ConsumerState<BillPreviewScreen> {
   _ViewMode _viewMode = _ViewMode.standard;
 
-  void _handleShare(Order order, String lrNumber, String lrDate, String consignorName, String? consignorDivision,
+  Future<void> _handleShare(Order order, String lrNumber, String lrDate, String consignorName, String? consignorDivision,
       String consignorAddress, String consigneeName, String consigneeAddress, String deliveryAddress, String vehicleNumber,
       String invoiceDetails, String goodsDescription, int numberOfBags, double ratePerBag, double totalBillAmount,
-      String amountInWords) {
+      String amountInWords) async {
+    final format = await showShareFormatDialog(context);
+    if (format == null || !mounted) return;
+
     final profile = ref.read(profileProvider);
     final bank = ref.read(banksProvider).firstOrNull;
-    final bankLines = bank != null
-        ? '*Bank Details:*\nBank: ${bank.bankName} | A/c No: ${bank.accountNumber}\n'
-            'Name: ${bank.accountHolderName} | IFSC: ${bank.ifscCode} | PAN: ${profile.pan}'
-        : '*PAN:* ${profile.pan}';
-    final text = '*${profile.businessName}*\n*LR NO:* $lrNumber | *DATE:* $lrDate\n\n'
-        '*Consignor (From):*\n$consignorName\n'
-        '${(consignorDivision?.isNotEmpty ?? false) ? '$consignorDivision\n' : ''}$consignorAddress\n\n'
-        '*Consignee (To):*\n$consigneeName\n$consigneeAddress\n\n'
-        '*Delivery Address:*\n$deliveryAddress\n\n'
-        '*Vehicle No:* $vehicleNumber\n*Invoice Details:* $invoiceDetails\n'
-        '*Goods:* $goodsDescription\n*Qty:* $numberOfBags BAGS\n*Rate:* ${ratePerBag.round()}/BAG\n'
-        '*Amount:* ₹${totalBillAmount.round()} /-\n*Amount in Words:* $amountInWords\n\n'
-        '$bankLines';
-    SharePlus.instance.share(ShareParams(text: text, subject: 'Transport Bill $lrNumber'));
+
+    if (format == ShareFormat.pdf) {
+      final bytes = await buildBillPdfBytes(
+        profile: profile,
+        bank: bank,
+        lrNumber: lrNumber,
+        lrDate: lrDate,
+        consignorName: consignorName,
+        consignorDivision: consignorDivision,
+        consignorAddress: consignorAddress,
+        consigneeName: consigneeName,
+        consigneeAddress: consigneeAddress,
+        deliveryAddress: deliveryAddress,
+        vehicleNumber: vehicleNumber,
+        invoiceDetails: invoiceDetails,
+        goodsDescription: goodsDescription,
+        numberOfBags: numberOfBags,
+        ratePerBag: ratePerBag,
+        totalBillAmount: totalBillAmount,
+        amountInWords: amountInWords,
+      );
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/Transport_Bill_$lrNumber.pdf');
+      await file.writeAsBytes(bytes);
+      await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], subject: 'Transport Bill $lrNumber'));
+    } else {
+      final bankLines = bank != null
+          ? '*Bank Details:*\nBank: ${bank.bankName} | A/c No: ${bank.accountNumber}\n'
+              'Name: ${bank.accountHolderName} | IFSC: ${bank.ifscCode} | PAN: ${profile.pan}'
+          : '*PAN:* ${profile.pan}';
+      final text = '*${profile.businessName}*\n*LR NO:* $lrNumber | *DATE:* $lrDate\n\n'
+          '*Consignor (From):*\n$consignorName\n'
+          '${(consignorDivision?.isNotEmpty ?? false) ? '$consignorDivision\n' : ''}$consignorAddress\n\n'
+          '*Consignee (To):*\n$consigneeName\n$consigneeAddress\n\n'
+          '*Delivery Address:*\n$deliveryAddress\n\n'
+          '*Vehicle No:* $vehicleNumber\n*Invoice Details:* $invoiceDetails\n'
+          '*Goods:* $goodsDescription\n*Qty:* $numberOfBags BAGS\n*Rate:* ${ratePerBag.round()}/BAG\n'
+          '*Amount:* ₹${totalBillAmount.round()} /-\n*Amount in Words:* $amountInWords\n\n'
+          '$bankLines';
+      await SharePlus.instance.share(ShareParams(text: text, subject: 'Transport Bill $lrNumber'));
+    }
+
+    if (!mounted) return;
     ref.read(toastProvider.notifier).show('Bill shared successfully');
   }
 
@@ -548,9 +584,9 @@ class _DetailedLedgerPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final driverAndRoadCost = order.driverExpense.driverFreight + order.driverExpense.otherTransportExpense;
-    final netProfit = totalBillAmount - driverAndRoadCost;
-    final margin = totalBillAmount > 0 ? (((totalBillAmount - order.driverExpense.driverFreight) / totalBillAmount) * 100).round() : 0;
+    final totalExpenses = order.orderExpenses.total;
+    final netProfit = totalBillAmount - totalExpenses;
+    final margin = totalBillAmount > 0 ? (netProfit / totalBillAmount * 100).round() : 0;
     final balanceDue = (totalBillAmount - order.amountReceived).clamp(0, double.infinity);
 
     return Container(
@@ -581,9 +617,9 @@ class _DetailedLedgerPanel extends StatelessWidget {
             children: [
               Expanded(child: _LedgerStat('Total Freight Revenue', formatINR(totalBillAmount), '$numberOfBags bags @ ₹${ratePerBag.round()}/bag', const Color(0xFFF8FAFC), const Color(0xFF64748B), const Color(0xFF0F172A))),
               const SizedBox(width: 8),
-              Expanded(child: _LedgerStat('Driver Freight & Road Cost', formatINR(driverAndRoadCost), 'Driver: ${order.driverName} (${order.vehicleNumber})', const Color(0xFFFFFBEB), const Color(0xFFB45309), const Color(0xFF92400E))),
+              Expanded(child: _LedgerStat('Trip Expenses', formatINR(totalExpenses), 'Vehicle: ${order.vehicleNumber}', const Color(0xFFFFFBEB), const Color(0xFFB45309), const Color(0xFF92400E))),
               const SizedBox(width: 8),
-              Expanded(child: _LedgerStat('Net Trip Profit', formatINR(netProfit), 'Margin: $margin%', const Color(0xFFECFDF5), const Color(0xFF047857), const Color(0xFF065F46))),
+              Expanded(child: _LedgerStat(netProfit >= 0 ? 'Net Trip Profit' : 'Net Trip Loss', formatINR(netProfit), 'Margin: $margin%', const Color(0xFFECFDF5), const Color(0xFF047857), const Color(0xFF065F46))),
             ],
           ),
           const SizedBox(height: 10),

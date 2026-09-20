@@ -40,22 +40,6 @@ enum PaymentStatus {
   String toJson() => jsonValue;
 }
 
-enum DriverPaymentStatus {
-  unpaid('Unpaid'),
-  advancePaid('Advance Paid'),
-  partiallyPaid('Partially Paid'),
-  paidInFull('Paid in Full');
-
-  const DriverPaymentStatus(this.jsonValue);
-
-  final String jsonValue;
-
-  static DriverPaymentStatus fromJson(String value) =>
-      values.firstWhere((e) => e.jsonValue == value);
-
-  String toJson() => jsonValue;
-}
-
 enum PaymentMethod {
   cash('Cash'),
   upi('UPI'),

@@ -52,7 +52,6 @@ class _OrderDetailsScreenState extends ConsumerState<OrderDetailsScreen> {
     final shareText = 'Transport Order #${order.orderNumber} - ${order.numberOfBags} Bags\n'
         'Route: ${order.pickupLocation} to ${order.deliveryLocation}\n'
         'Vehicle: ${order.vehicleNumber}\n'
-        'Driver: ${order.driverName}\n'
         'Gross Bill: ${formatINR(order.charges.totalCustomerBill)}';
     SharePlus.instance.share(ShareParams(text: shareText, subject: 'Transport Order ${order.orderNumber}'));
   }
@@ -85,7 +84,6 @@ class _OrderDetailsScreenState extends ConsumerState<OrderDetailsScreen> {
     final pendingCustomerReceivable =
         (order.billing.netExpectedReceipt != 0 ? order.billing.netExpectedReceipt : order.charges.totalCustomerBill) -
             order.amountReceived;
-    final pendingDriverPayable = order.driverExpense.driverFreight - order.driverExpense.driverPaidAmount;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -142,8 +140,6 @@ class _OrderDetailsScreenState extends ConsumerState<OrderDetailsScreen> {
         _RoutePartiesCard(order: order),
         const SizedBox(height: 12),
         _ChargeBreakdownCard(order: order, pendingCustomerReceivable: pendingCustomerReceivable),
-        const SizedBox(height: 12),
-        _DriverPaymentCard(order: order, pendingDriverPayable: pendingDriverPayable),
         const SizedBox(height: 12),
         _ProfitSummaryCard(order: order),
         const SizedBox(height: 12),
@@ -302,12 +298,11 @@ class _PrimaryActionsGrid extends StatelessWidget {
         const Color(0xFF059669),
         'Receive Pay',
         () => context.push(
-              '${AppRoutes.receivePayment}?orderId=${order.id}&partyType=${order.billing.billPayer.toJson()}'
+              '${AppRoutes.receivePayment}?partyType=${order.billing.billPayer.toJson()}'
               '&partyId=${order.billing.billPayer == PayerType.company ? order.companyId : order.customerId}',
             ),
         null,
       ),
-      (Icons.badge_outlined, const Color(0xFFD97706), 'Pay Driver', () => context.push('${AppRoutes.payDriver}?orderId=${order.id}&driverId=${order.driverId}'), null),
       (Icons.share_outlined, const Color(0xFF4F46E5), 'Share Bill', onShare, null),
     ];
 
@@ -561,9 +556,7 @@ class _ChargeBreakdownCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          _LineRow('Loading Charges (${order.numberOfBags} bags)', formatINR(order.charges.loadingCharges)),
-          _LineRow('Transportation Charges', formatINR(order.charges.transportationCharges)),
-          if (order.charges.otherCharges > 0) _LineRow('Other Transport & Toll Charges', formatINR(order.charges.otherCharges)),
+          _LineRow('${order.numberOfBags} Bags × ₹${(order.ratePerBag ?? 0).round()}/bag', formatINR(order.charges.totalCustomerBill)),
           const Divider(height: 14, color: Color(0xFFF1F5F9)),
           _LineRow('Gross Bill Amount', formatINR(order.charges.totalCustomerBill), bold: true),
           if (order.billing.tdsApplicable)
@@ -631,55 +624,6 @@ class _LineRow extends StatelessWidget {
   }
 }
 
-class _DriverPaymentCard extends StatelessWidget {
-  const _DriverPaymentCard({required this.order, required this.pendingDriverPayable});
-
-  final Order order;
-  final double pendingDriverPayable;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.local_shipping, size: 16, color: Color(0xFFD97706)),
-                  SizedBox(width: 6),
-                  Text('DRIVER PAYMENT DETAILS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
-                ],
-              ),
-              StatusBadge(status: order.driverExpense.driverPaymentStatus.jsonValue, type: StatusBadgeType.driver),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _LineRow('Driver Name', order.driverName),
-          _LineRow('Driver Agreed Freight', formatINR(order.driverExpense.driverFreight)),
-          _LineRow('Driver Paid Amount', formatINR(order.driverExpense.driverPaidAmount), color: const Color(0xFF047857)),
-          const Divider(height: 14, color: Color(0xFFF1F5F9)),
-          _LineRow('Balance Driver Freight', formatINR(pendingDriverPayable), bold: true, color: pendingDriverPayable > 0 ? const Color(0xFFDC2626) : const Color(0xFF047857)),
-          if (order.driverExpense.driverBillNumber.isNotEmpty) _LineRow('Driver Bill No:', order.driverExpense.driverBillNumber),
-          if (pendingDriverPayable > 0) ...[
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => context.push('${AppRoutes.payDriver}?orderId=${order.id}&driverId=${order.driverId}'),
-                icon: const Icon(Icons.badge_outlined, size: 14),
-                label: Text('Pay Driver Dues (${formatINR(pendingDriverPayable)})'),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _ProfitSummaryCard extends StatelessWidget {
   const _ProfitSummaryCard({required this.order});
 
@@ -687,7 +631,8 @@ class _ProfitSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final otherExpenses = order.driverExpense.additionalLoadingExpense + order.driverExpense.otherTransportExpense;
+    final expenses = order.orderExpenses;
+    final profit = order.financialSummary.estimatedProfit;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(20)),
@@ -696,11 +641,17 @@ class _ProfitSummaryCard extends StatelessWidget {
         children: [
           const Text('TRIP PROFIT CALCULATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFCBD5E1))),
           const SizedBox(height: 8),
-          _DarkLineRow('Earned Revenue (Gross Bill)', formatINR(order.charges.totalCustomerBill)),
-          _DarkLineRow('Driver Freight Expense', '-${formatINR(order.driverExpense.driverFreight)}', color: const Color(0xFFFCA5A5)),
-          _DarkLineRow('Other Operating Expenses', '-${formatINR(otherExpenses)}', color: const Color(0xFFFCA5A5)),
+          _DarkLineRow('Order Total', formatINR(order.charges.totalCustomerBill)),
+          _DarkLineRow('Transportation (incl. driver payment)', '-${formatINR(expenses.transportationCharges)}', color: const Color(0xFFFCA5A5)),
+          if (expenses.loadingCharges > 0) _DarkLineRow('Loading Expense', '-${formatINR(expenses.loadingCharges)}', color: const Color(0xFFFCA5A5)),
+          if (expenses.otherCharges > 0) _DarkLineRow('Other Expense', '-${formatINR(expenses.otherCharges)}', color: const Color(0xFFFCA5A5)),
           const Divider(height: 16, color: Color(0xFF1E293B)),
-          _DarkLineRow('Net Trip Profit', formatINR(order.financialSummary.estimatedProfit), bold: true, color: const Color(0xFF34D399)),
+          _DarkLineRow(
+            profit >= 0 ? 'Net Trip Profit' : 'Net Trip Loss',
+            formatINR(profit),
+            bold: true,
+            color: profit >= 0 ? const Color(0xFF34D399) : const Color(0xFFFCA5A5),
+          ),
         ],
       ),
     );

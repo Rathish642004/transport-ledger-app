@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import '../models/enums.dart';
 import '../models/expense_record.dart';
 import '../providers/banks_provider.dart';
-import '../providers/drivers_provider.dart';
 import '../providers/expenses_provider.dart';
 import '../providers/orders_provider.dart';
 import '../providers/toast_provider.dart';
@@ -34,8 +33,6 @@ const _categories = [
 /// the obviously-intended fields here rather than reproducing data loss;
 /// `paidTo` has no form field in the source either, so it's left empty —
 /// faithful to what the form actually collects, not a real fix to that gap.
-/// The driver selector, like in the source, doesn't affect what's saved
-/// (`ExpenseRecord` has no `driverId` field).
 class ExpenseEntryScreen extends ConsumerStatefulWidget {
   const ExpenseEntryScreen({super.key, this.orderId});
 
@@ -51,7 +48,6 @@ class _ExpenseEntryScreenState extends ConsumerState<ExpenseEntryScreen> {
   late String _expenseDate;
   late String _selectedOrderId;
   late final TextEditingController _vehicleNumberCtrl;
-  late String _driverId;
   PaymentMethod _paymentMethod = PaymentMethod.cash;
   late final TextEditingController _descriptionCtrl;
   String _receiptAttachment = '';
@@ -60,12 +56,10 @@ class _ExpenseEntryScreenState extends ConsumerState<ExpenseEntryScreen> {
   @override
   void initState() {
     super.initState();
-    final drivers = ref.read(driversProvider);
     _amountCtrl = TextEditingController();
     _expenseDate = getTodayDateString();
     _selectedOrderId = widget.orderId ?? '';
     _vehicleNumberCtrl = TextEditingController();
-    _driverId = drivers.isNotEmpty ? drivers.first.id : '';
     _descriptionCtrl = TextEditingController();
   }
 
@@ -83,7 +77,6 @@ class _ExpenseEntryScreenState extends ConsumerState<ExpenseEntryScreen> {
       for (final o in orders) {
         if (o.id == orderId) {
           _vehicleNumberCtrl.text = o.vehicleNumber as String;
-          _driverId = o.driverId as String;
           break;
         }
       }
@@ -131,7 +124,6 @@ class _ExpenseEntryScreenState extends ConsumerState<ExpenseEntryScreen> {
   @override
   Widget build(BuildContext context) {
     final orders = ref.watch(ordersProvider);
-    final drivers = ref.watch(driversProvider);
     final banks = ref.watch(banksProvider);
 
     return ListView(
@@ -242,38 +234,8 @@ class _ExpenseEntryScreenState extends ConsumerState<ExpenseEntryScreen> {
                 onChanged: (v) => _handleOrderChange(v ?? '', orders),
               ),
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const _FieldLabel('Vehicle Truck No.'),
-                        TextField(controller: _vehicleNumberCtrl, textCapitalization: TextCapitalization.characters, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold), decoration: _decoration()),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const _FieldLabel('Driver'),
-                        DropdownButtonFormField<String>(
-                          isExpanded: true,
-                          initialValue: drivers.any((d) => d.id == _driverId) ? _driverId : '',
-                          decoration: _decoration(),
-                          items: [
-                            const DropdownMenuItem(value: '', child: Text('-- Optional --')),
-                            for (final d in drivers) DropdownMenuItem(value: d.id, child: Text(d.name, overflow: TextOverflow.ellipsis)),
-                          ],
-                          onChanged: (v) => setState(() => _driverId = v ?? ''),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+              const _FieldLabel('Vehicle Truck No.'),
+              TextField(controller: _vehicleNumberCtrl, textCapitalization: TextCapitalization.characters, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold), decoration: _decoration()),
               const SizedBox(height: 10),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,

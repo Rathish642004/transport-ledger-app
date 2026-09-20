@@ -69,11 +69,11 @@ class DashboardScreen extends ConsumerWidget {
             const SizedBox(width: 12),
             Expanded(
               child: _MetricTile(
-                label: 'Driver Payable',
+                label: 'Total Expenses',
                 dotColor: const Color(0xFFE11D48),
-                value: formatINR(metrics.driverPayables),
-                subtitle: 'Freight dues across truck drivers',
-                onTap: () => context.push('${AppRoutes.ledger}?tab=drivers'),
+                value: formatINR(metrics.totalExpenses),
+                subtitle: 'Trip expenses across all orders',
+                onTap: () => context.push(AppRoutes.reports),
               ),
             ),
           ],
@@ -574,12 +574,12 @@ class _QuickActionsCard extends StatelessWidget {
               ),
               Expanded(
                 child: _QuickAction(
-                  icon: Icons.badge,
+                  icon: Icons.receipt_long,
                   bg: const Color(0xFFFFFBEB),
                   fg: const Color(0xFF92400E),
                   iconBg: const Color(0xFFD97706),
-                  label: 'Pay Driver',
-                  onTap: () => context.push(AppRoutes.payDriver),
+                  label: 'Add Expense',
+                  onTap: () => context.push(AppRoutes.expense),
                 ),
               ),
               Expanded(

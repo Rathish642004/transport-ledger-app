@@ -16,7 +16,7 @@ String _csvNum(num n) => n == n.roundToDouble() ? n.toInt().toString() : n.toStr
 
 List<List<String>> _rows(List<Order> orders) {
   return [
-    ['Order No', 'Date', 'Company', 'Customer', 'Vehicle', 'Driver', 'Bags', 'Status', 'Payment', 'Bill (INR)', 'Received (INR)', 'Due (INR)'],
+    ['Order No', 'Date', 'Company', 'Customer', 'Vehicle', 'Bags', 'Status', 'Payment', 'Bill (INR)', 'Received (INR)', 'Due (INR)'],
     for (final o in orders)
       [
         o.orderNumber,
@@ -24,7 +24,6 @@ List<List<String>> _rows(List<Order> orders) {
         o.companyName,
         o.customerName,
         o.vehicleNumber,
-        o.driverName,
         '${o.numberOfBags}',
         o.orderStatus.jsonValue,
         o.paymentStatus.jsonValue,
@@ -66,7 +65,7 @@ Future<void> exportOrdersPdf(List<Order> orders) async {
           headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
           cellStyle: const pw.TextStyle(fontSize: 8),
           headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey100),
-          cellAlignments: {6: pw.Alignment.centerRight, 9: pw.Alignment.centerRight, 10: pw.Alignment.centerRight, 11: pw.Alignment.centerRight},
+          cellAlignments: {5: pw.Alignment.centerRight, 8: pw.Alignment.centerRight, 9: pw.Alignment.centerRight, 10: pw.Alignment.centerRight},
         ),
       ],
     ),

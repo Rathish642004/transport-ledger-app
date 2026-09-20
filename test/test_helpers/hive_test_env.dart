@@ -6,8 +6,6 @@ import 'package:flutter_app/models/backup_sync_state.dart';
 import 'package:flutter_app/models/bank_account.dart';
 import 'package:flutter_app/models/company.dart';
 import 'package:flutter_app/models/customer.dart';
-import 'package:flutter_app/models/driver.dart';
-import 'package:flutter_app/models/driver_payment_record.dart';
 import 'package:flutter_app/models/expense_record.dart';
 import 'package:flutter_app/models/hive_registrar.g.dart';
 import 'package:flutter_app/models/order.dart';
@@ -32,9 +30,7 @@ Future<Directory> openTestHive() async {
     Hive.openBox<Order>(StorageKeys.orders),
     Hive.openBox<Company>(StorageKeys.companies),
     Hive.openBox<Customer>(StorageKeys.customers),
-    Hive.openBox<Driver>(StorageKeys.drivers),
     Hive.openBox<PaymentReceipt>(StorageKeys.payments),
-    Hive.openBox<DriverPaymentRecord>(StorageKeys.driverPayments),
     Hive.openBox<ExpenseRecord>(StorageKeys.expenses),
     Hive.openBox<TransporterProfile>(StorageKeys.profile),
     Hive.openBox<BackupSyncState>(StorageKeys.backup),

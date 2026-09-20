@@ -37,9 +37,7 @@ void main() {
     expect(ordersBox.length, initialOrders.length);
     expect(companiesBox.length, initialCompanies.length);
     expect(customersBox.length, initialCustomers.length);
-    expect(driversBox.length, initialDrivers.length);
     expect(paymentsBox.length, initialPaymentReceipts.length);
-    expect(driverPaymentsBox.length, initialDriverPayments.length);
     expect(expensesBox.length, initialExpenses.length);
     expect(profileBox.get(StorageKeys.singleValueKey)!.toJson(), initialProfile.toJson());
     expect(backupBox.get(StorageKeys.singleValueKey)!.toJson(), initialBackupSettings.toJson());

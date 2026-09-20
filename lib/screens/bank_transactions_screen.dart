@@ -4,15 +4,14 @@ import 'package:go_router/go_router.dart';
 
 import '../models/bank_account.dart';
 import '../providers/banks_provider.dart';
-import '../providers/driver_payments_provider.dart';
 import '../providers/expenses_provider.dart';
 import '../providers/payments_provider.dart';
 import '../utils/formatters.dart';
 import '../widgets/transaction_list_panel.dart';
 
-/// New screen — not in the React source. Shows every payment received,
-/// driver payment, and expense recorded against one [BankAccount], with a
-/// running in/out summary. The counterpart to `BanksListScreen`.
+/// New screen — not in the React source. Shows every payment received and
+/// expense recorded against one [BankAccount], with a running in/out
+/// summary. The counterpart to `BanksListScreen`.
 class BankTransactionsScreen extends ConsumerWidget {
   const BankTransactionsScreen({super.key, required this.bankAccountId});
 
@@ -20,7 +19,6 @@ class BankTransactionsScreen extends ConsumerWidget {
 
   List<TransactionEntry> _buildEntries(WidgetRef ref) {
     final payments = ref.watch(paymentsProvider).where((p) => p.bankAccountId == bankAccountId);
-    final driverPayments = ref.watch(driverPaymentsProvider).where((dp) => dp.bankAccountId == bankAccountId);
     final expenses = ref.watch(expensesProvider).where((e) => e.bankAccountId == bankAccountId);
 
     final list = <TransactionEntry>[];
@@ -29,25 +27,12 @@ class BankTransactionsScreen extends ConsumerWidget {
         id: p.id,
         date: p.paymentDate,
         title: 'Payment Received (${p.payerType.jsonValue})',
-        subtitle: 'Order #${p.orderNumber} • ${p.receiptNumber}',
+        subtitle: p.allocations.isEmpty ? p.receiptNumber : '${p.allocations.map((a) => a.orderNumber).join(', ')} • ${p.receiptNumber}',
         party: p.payerName,
         isInflow: true,
         amount: p.amountReceived,
         method: p.paymentMethod.jsonValue,
         ref: p.referenceNumber,
-      ));
-    }
-    for (final dp in driverPayments) {
-      list.add(TransactionEntry(
-        id: dp.id,
-        date: dp.paymentDate,
-        title: 'Driver Freight Paid',
-        subtitle: 'Order #${dp.orderNumber} • ${dp.driverBillNumber}',
-        party: dp.driverName,
-        isInflow: false,
-        amount: dp.amountPaid,
-        method: dp.paymentMethod.jsonValue,
-        ref: dp.referenceNumber,
       ));
     }
     for (final ex in expenses) {
@@ -141,7 +126,7 @@ class BankTransactionsScreen extends ConsumerWidget {
           entries: entries,
           headerEyebrow: 'BANK ACCOUNT ACTIVITY',
           headerTitle: 'Transactions for this Account',
-          emptyLabel: 'No payments, driver payments, or expenses have been recorded against this account yet.',
+          emptyLabel: 'No payments or expenses have been recorded against this account yet.',
         ),
       ],
     );

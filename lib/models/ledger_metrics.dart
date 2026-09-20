@@ -12,7 +12,6 @@ class LedgerMetrics {
     required this.customerReceivables,
     required this.companyReceivables,
     required this.totalReceivables,
-    required this.driverPayables,
     required this.pendingBillsCount,
     required this.overdueBillsCount,
     required this.ordersInProgressCount,
@@ -29,7 +28,6 @@ class LedgerMetrics {
   final double customerReceivables;
   final double companyReceivables;
   final double totalReceivables;
-  final double driverPayables;
   final int pendingBillsCount;
   final int overdueBillsCount;
   final int ordersInProgressCount;

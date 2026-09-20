@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/order.dart';
-import '../providers/driver_payments_provider.dart';
 import '../providers/orders_provider.dart';
 import '../providers/payments_provider.dart';
 import '../utils/formatters.dart';
@@ -100,7 +99,7 @@ Future<bool> showDeleteOrderDialog(BuildContext context, WidgetRef ref, Order or
                       border: Border.all(color: const Color(0xFFFDE68A)),
                     ),
                     child: const Text(
-                      'This will remove the official invoice, driver freight entries, and associated ledger records for this trip.',
+                      'This will remove the official invoice and associated ledger records for this trip. Any payments already received against it become unallocated credit for the payer.',
                       style: TextStyle(fontSize: 11, color: Color(0xFFB45309), fontWeight: FontWeight.w500),
                     ),
                   ),
@@ -137,17 +136,13 @@ Future<bool> showDeleteOrderDialog(BuildContext context, WidgetRef ref, Order or
   );
 
   if (confirmed == true) {
-    // The dialog's own copy above already promises this ("...driver freight
-    // entries, and associated ledger records for this trip") — actually
-    // doing it: an order's payment receipts and driver payment vouchers
-    // would otherwise survive as orphans, still counted in the payer's/
-    // driver's outstanding balance for an order that no longer exists.
-    for (final p in ref.read(paymentsProvider).where((p) => p.orderId == order.id).toList()) {
-      ref.read(paymentsProvider.notifier).removePayment(p.id);
-    }
-    for (final dp in ref.read(driverPaymentsProvider).where((dp) => dp.orderId == order.id).toList()) {
-      ref.read(driverPaymentsProvider.notifier).removeDriverPayment(dp.id);
-    }
+    // The dialog's own copy above already promises this ("...associated
+    // ledger records for this trip") — actually doing it: any payment
+    // receipts that allocated money to this order would otherwise keep
+    // pointing at an order that no longer exists. The money itself was
+    // really received, so it becomes unallocated credit against the party
+    // rather than being deleted along with the order.
+    ref.read(paymentsProvider.notifier).stripOrderAllocations(order.id);
     ref.read(ordersProvider.notifier).deleteOrder(order.id);
     return true;
   }

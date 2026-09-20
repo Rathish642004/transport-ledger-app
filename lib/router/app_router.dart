@@ -6,7 +6,6 @@ import '../models/order.dart';
 import '../screens/add_edit_company_screen.dart';
 import '../screens/add_edit_customer_screen.dart';
 import '../screens/add_edit_bank_screen.dart';
-import '../screens/add_edit_driver_screen.dart';
 import '../screens/bank_transactions_screen.dart';
 import '../screens/banks_list_screen.dart';
 import '../screens/bill_preview_screen.dart';
@@ -14,13 +13,11 @@ import '../screens/companies_list_screen.dart';
 import '../screens/create_order_screen.dart';
 import '../screens/customers_list_screen.dart';
 import '../screens/dashboard_screen.dart';
-import '../screens/drivers_list_screen.dart';
 import '../screens/expense_entry_screen.dart';
 import '../screens/ledger_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/order_details_screen.dart';
 import '../screens/orders_list_screen.dart';
-import '../screens/pay_driver_screen.dart';
 import '../screens/receive_payment_screen.dart';
 import '../screens/reports_screen.dart';
 import '../screens/settings_screen.dart';
@@ -39,17 +36,14 @@ class AppRoutes {
   static const orderDetails = '/orders/:id';
   static const billPreview = '/orders/:id/bill';
   static const receivePayment = '/receive-payment';
-  static const payDriver = '/pay-driver';
   static const expense = '/expense';
   static const ledger = '/ledger';
   static const reports = '/reports';
   static const settings = '/settings';
   static const companies = '/companies';
   static const customers = '/customers';
-  static const drivers = '/drivers';
   static const companiesEdit = '/companies/edit';
   static const customersEdit = '/customers/edit';
-  static const driversEdit = '/drivers/edit';
   static const banks = '/banks';
   static const banksEdit = '/banks/edit';
   static const bankTransactions = '/banks/:id/transactions';
@@ -114,18 +108,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.receivePayment,
             builder: (context, state) => ReceivePaymentScreen(
-              orderId: state.uri.queryParameters['orderId'],
               partyType: state.uri.queryParameters['partyType'] != null
                   ? PayerType.fromJson(state.uri.queryParameters['partyType']!)
                   : null,
               partyId: state.uri.queryParameters['partyId'],
-            ),
-          ),
-          GoRoute(
-            path: AppRoutes.payDriver,
-            builder: (context, state) => PayDriverScreen(
-              orderId: state.uri.queryParameters['orderId'],
-              driverId: state.uri.queryParameters['driverId'],
             ),
           ),
           GoRoute(
@@ -153,20 +139,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             builder: (context, state) => const CustomersListScreen(),
           ),
           GoRoute(
-            path: AppRoutes.drivers,
-            builder: (context, state) => const DriversListScreen(),
-          ),
-          GoRoute(
             path: AppRoutes.companiesEdit,
             builder: (context, state) => AddEditCompanyScreen(companyId: state.uri.queryParameters['id']),
           ),
           GoRoute(
             path: AppRoutes.customersEdit,
             builder: (context, state) => AddEditCustomerScreen(customerId: state.uri.queryParameters['id']),
-          ),
-          GoRoute(
-            path: AppRoutes.driversEdit,
-            builder: (context, state) => AddEditDriverScreen(driverId: state.uri.queryParameters['id']),
           ),
           GoRoute(
             path: AppRoutes.banks,

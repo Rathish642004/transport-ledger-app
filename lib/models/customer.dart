@@ -1,4 +1,5 @@
-/// Mirrors `src/types.ts` `Customer`.
+/// Mirrors `src/types.ts` `Customer`. Billing/outstanding totals are derived
+/// from orders + payments (see `partyLedgerProvider`), not stored here.
 class Customer {
   const Customer({
     required this.id,
@@ -10,11 +11,8 @@ class Customer {
     required this.city,
     this.gstin,
     this.pan,
-    required this.totalOrders,
-    required this.totalBagsReceived,
-    required this.totalBilled,
-    required this.totalReceived,
-    required this.outstandingBalance,
+    this.tdsApplicable,
+    this.tdsPercentage,
   });
 
   final String id;
@@ -26,11 +24,14 @@ class Customer {
   final String city;
   final String? gstin;
   final String? pan;
-  final int totalOrders;
-  final int totalBagsReceived;
-  final double totalBilled;
-  final double totalReceived;
-  final double outstandingBalance;
+
+  /// Nullable so records persisted before TDS support was added still decode
+  /// — see [hasTds]/[effectiveTdsPercentage] for the non-null accessors.
+  final bool? tdsApplicable;
+  final double? tdsPercentage;
+
+  bool get hasTds => tdsApplicable == true;
+  double get effectiveTdsPercentage => hasTds ? (tdsPercentage ?? 0) : 0;
 
   Customer copyWith({
     String? id,
@@ -42,11 +43,8 @@ class Customer {
     String? city,
     String? gstin,
     String? pan,
-    int? totalOrders,
-    int? totalBagsReceived,
-    double? totalBilled,
-    double? totalReceived,
-    double? outstandingBalance,
+    bool? tdsApplicable,
+    double? tdsPercentage,
   }) {
     return Customer(
       id: id ?? this.id,
@@ -58,11 +56,8 @@ class Customer {
       city: city ?? this.city,
       gstin: gstin ?? this.gstin,
       pan: pan ?? this.pan,
-      totalOrders: totalOrders ?? this.totalOrders,
-      totalBagsReceived: totalBagsReceived ?? this.totalBagsReceived,
-      totalBilled: totalBilled ?? this.totalBilled,
-      totalReceived: totalReceived ?? this.totalReceived,
-      outstandingBalance: outstandingBalance ?? this.outstandingBalance,
+      tdsApplicable: tdsApplicable ?? this.tdsApplicable,
+      tdsPercentage: tdsPercentage ?? this.tdsPercentage,
     );
   }
 
@@ -77,11 +72,8 @@ class Customer {
       city: json['city'] as String,
       gstin: json['gstin'] as String?,
       pan: json['pan'] as String?,
-      totalOrders: (json['totalOrders'] as num).toInt(),
-      totalBagsReceived: (json['totalBagsReceived'] as num).toInt(),
-      totalBilled: (json['totalBilled'] as num).toDouble(),
-      totalReceived: (json['totalReceived'] as num).toDouble(),
-      outstandingBalance: (json['outstandingBalance'] as num).toDouble(),
+      tdsApplicable: json['tdsApplicable'] as bool?,
+      tdsPercentage: (json['tdsPercentage'] as num?)?.toDouble(),
     );
   }
 
@@ -95,10 +87,7 @@ class Customer {
         'city': city,
         if (gstin != null) 'gstin': gstin,
         if (pan != null) 'pan': pan,
-        'totalOrders': totalOrders,
-        'totalBagsReceived': totalBagsReceived,
-        'totalBilled': totalBilled,
-        'totalReceived': totalReceived,
-        'outstandingBalance': outstandingBalance,
+        if (tdsApplicable != null) 'tdsApplicable': tdsApplicable,
+        if (tdsPercentage != null) 'tdsPercentage': tdsPercentage,
       };
 }

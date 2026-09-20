@@ -4,12 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../models/company.dart';
 import '../models/customer.dart';
-import '../models/driver.dart';
 import '../models/enums.dart';
 import '../models/order.dart';
 import '../providers/companies_provider.dart';
 import '../providers/customers_provider.dart';
-import '../providers/drivers_provider.dart';
 import '../providers/orders_provider.dart';
 import '../providers/toast_provider.dart';
 import '../router/app_router.dart';
@@ -61,7 +59,7 @@ Iterable<String> _previousGoodsDescriptions(List<Order> orders, String query) {
   return options.where((g) => g.toLowerCase().contains(lowerQuery));
 }
 
-enum _Section { details, charges, driver, billing }
+enum _Section { details, expenses, billing }
 
 class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
   _Section _openSection = _Section.details;
@@ -76,11 +74,11 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
   // All fields below are assigned once, eagerly, in initState — NOT via
   // lazy `late` field initializers. Several of these controllers were never
   // touched during build() when their accordion section stayed closed for
-  // the whole session (e.g. Section 4's fields when the user never opens
-  // it), so a lazy `late` initializer — one that reads `ref` — would only
-  // run on first access, which happened to be inside `dispose()`'s cleanup
-  // loop. `ref` is unsafe to use once the widget is unmounted, so that
-  // crashed. Eager assignment in initState sidesteps this entirely.
+  // the whole session (e.g. the billing section's fields when the user never
+  // opens it), so a lazy `late` initializer — one that reads `ref` — would
+  // only run on first access, which happened to be inside `dispose()`'s
+  // cleanup loop. `ref` is unsafe to use once the widget is unmounted, so
+  // that crashed. Eager assignment in initState sidesteps this entirely.
 
   // Section 1
   late final TextEditingController _lrNumberCtrl;
@@ -102,47 +100,77 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
   late final TextEditingController _vehicleNumberCtrl;
   late final TextEditingController _invoiceDetailsCtrl;
 
-  late String _driverId;
-  late String _driverName;
-
   late int _numberOfBags;
   late final TextEditingController _goodsDescriptionCtrl;
   late double _ratePerBag;
   late final TextEditingController _orderNotesCtrl;
 
-  // Section 2
+  /// The whole amount the customer/company pays — qty × rate, and nothing
+  /// else. Everything incurred for the trip is an expense (Section 2)
+  /// subtracted from this, not added into it.
+  double get _orderTotal => _numberOfBags * _ratePerBag;
+
+  // Section 2 — expenses incurred for this order (not billed to the party).
+  // Transportation now includes whatever is paid to the driver; there is no
+  // separate driver ledger.
   late double _loadingCharges;
   late double _transportationCharges;
   late double _otherCharges;
 
-  double get _totalCustomerBill => _loadingCharges + _transportationCharges + _otherCharges;
+  double get _totalExpenses => _loadingCharges + _transportationCharges + _otherCharges;
 
-  // Section 3
-  late double _driverFreight;
-  late double _driverPaidAmount;
-  late final TextEditingController _driverBillNumberCtrl;
-  // No UI input for these three in the source either — carried through from
-  // initialData (edit) or defaulted, never user-editable on this screen.
-  late final String _driverBillDate;
-  late final double _additionalLoadingExpense;
-  late final double _otherTransportExpense;
-  late final String _driverBillAttachmentName;
+  /// This order's revenue — may be negative when expenses exceed the total.
+  double get _netProfit => _orderTotal - _totalExpenses;
 
-  // Section 4
+  // Section 3 (billing)
   late PayerType _billPayer;
   late final TextEditingController _billRecipientNameCtrl;
   late final TextEditingController _billNumberCtrl;
-  // No UI input for these four in the source either — same as the driver
-  // fields above.
+  // No UI input for these two in the source either — carried through from
+  // initialData (edit) or defaulted, never user-editable on this screen.
   late final String _billDate;
-  late final bool _tdsApplicable;
-  late final double _tdsPercentage;
   late final double _otherDeductions;
   late final TextEditingController _paymentTermsCtrl;
   late final TextEditingController _billingNotesCtrl;
 
-  double get _tdsAmount => _tdsApplicable ? ((_totalCustomerBill * _tdsPercentage) / 100).roundToDouble() : 0;
-  double get _netExpectedReceipt => _totalCustomerBill - _tdsAmount - _otherDeductions;
+  /// Seeded from the bill payer's own TDS setting (see [_seedTdsFromParty]),
+  /// but editable per order as an override — mutable, unlike the rest of
+  /// this section's fields.
+  late bool _tdsApplicable;
+  late double _tdsPercentage;
+
+  double get _tdsAmount => _tdsApplicable ? ((_orderTotal * _tdsPercentage) / 100).roundToDouble() : 0;
+  double get _netExpectedReceipt => _orderTotal - _tdsAmount - _otherDeductions;
+
+  Company? _findCompany(String id) {
+    for (final c in ref.read(companiesProvider)) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  Customer? _findCustomer(String id) {
+    for (final c in ref.read(customersProvider)) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  /// Re-seeds TDS from whichever party the bill is currently payable by —
+  /// only while creating a new order; an order being edited keeps whatever
+  /// TDS values were saved on it, so this never silently overwrites an
+  /// existing bill.
+  void _seedTdsFromParty() {
+    if (_billPayer == PayerType.company) {
+      final company = _findCompany(_companyId);
+      _tdsApplicable = company?.hasTds ?? false;
+      _tdsPercentage = company?.effectiveTdsPercentage ?? 0;
+    } else {
+      final customer = _findCustomer(_customerId);
+      _tdsApplicable = customer?.hasTds ?? false;
+      _tdsPercentage = customer?.effectiveTdsPercentage ?? 0;
+    }
+  }
 
   @override
   void initState() {
@@ -150,7 +178,6 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
     final initial = _initial;
     final companies = ref.read(companiesProvider);
     final customers = ref.read(customersProvider);
-    final drivers = ref.read(driversProvider);
     final nextOrderNumber = _nextOrderNumber(ref.read(ordersProvider));
 
     _orderNumber = initial?.orderNumber ?? nextOrderNumber;
@@ -183,43 +210,32 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
     _deliveryAddressCtrl = TextEditingController(text: initial?.deliveryAddress ?? autoCustomerAddress ?? '');
     _pickupLocationCtrl = TextEditingController(text: initial?.pickupLocation ?? autoCompanyAddress ?? '');
     _deliveryLocationCtrl = TextEditingController(text: initial?.deliveryLocation ?? autoCustomerAddress ?? '');
+    _vehicleNumberCtrl = TextEditingController(text: initial?.vehicleNumber ?? '');
     _invoiceDetailsCtrl = TextEditingController(text: initial?.invoiceDetails ?? '');
-
-    final autoDriver = initial == null && drivers.isNotEmpty ? drivers.first : null;
-    _driverId = initial?.driverId ?? autoDriver?.id ?? '';
-    _driverName = initial?.driverName ?? autoDriver?.name ?? '';
-    // Auto-selecting the first driver should also auto-fill their (first)
-    // vehicle, the same as actually picking them from the dropdown does —
-    // see `_onDriverChanged`.
-    _vehicleNumberCtrl = TextEditingController(text: initial?.vehicleNumber ?? autoDriver?.vehicleNumber ?? '');
 
     _numberOfBags = initial?.numberOfBags ?? 55;
     _goodsDescriptionCtrl = TextEditingController(text: initial?.goodsDescription ?? initial?.bagType ?? '');
     _ratePerBag = initial?.ratePerBag ?? 100;
     _orderNotesCtrl = TextEditingController(text: initial?.notes ?? '');
 
-    _loadingCharges = initial?.charges.loadingCharges ?? 0;
-    _transportationCharges = initial?.charges.transportationCharges ??
-        ((initial != null && initial.numberOfBags > 0) ? initial.numberOfBags * (initial.ratePerBag ?? 100) : 5500);
-    _otherCharges = initial?.charges.otherCharges ?? 0;
-
-    _driverFreight = initial?.driverExpense.driverFreight ?? 4200;
-    _driverPaidAmount = initial?.driverExpense.driverPaidAmount ?? 3000;
-    _driverBillNumberCtrl = TextEditingController(text: initial?.driverExpense.driverBillNumber ?? '');
-    _driverBillDate = initial?.driverExpense.driverBillDate ?? getTodayDateString();
-    _additionalLoadingExpense = initial?.driverExpense.additionalLoadingExpense ?? 0;
-    _otherTransportExpense = initial?.driverExpense.otherTransportExpense ?? 200;
-    _driverBillAttachmentName = initial?.driverExpense.driverBillAttachment ?? '';
+    _loadingCharges = initial?.orderExpenses.loadingCharges ?? 0;
+    _transportationCharges = initial?.orderExpenses.transportationCharges ?? 4400;
+    _otherCharges = initial?.orderExpenses.otherCharges ?? 0;
 
     _billPayer = initial?.billing.billPayer ?? PayerType.company;
     _billRecipientNameCtrl = TextEditingController(text: initial?.billing.billRecipientName ?? _companyName);
     _billNumberCtrl = TextEditingController(text: initial?.billing.billNumber ?? _lrNumberCtrl.text);
     _billDate = initial?.billing.billDate ?? getTodayDateString();
-    _tdsApplicable = initial?.billing.tdsApplicable ?? false;
-    _tdsPercentage = initial?.billing.tdsPercentage ?? 0;
     _otherDeductions = initial?.billing.otherDeductions ?? 0;
     _paymentTermsCtrl = TextEditingController(text: initial?.billing.paymentTerms ?? '15 Days Credit');
     _billingNotesCtrl = TextEditingController(text: initial?.billing.notes ?? '');
+
+    if (initial != null) {
+      _tdsApplicable = initial.billing.tdsApplicable;
+      _tdsPercentage = initial.billing.tdsPercentage;
+    } else {
+      _seedTdsFromParty();
+    }
   }
 
   @override
@@ -236,7 +252,6 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
       _invoiceDetailsCtrl,
       _goodsDescriptionCtrl,
       _orderNotesCtrl,
-      _driverBillNumberCtrl,
       _billRecipientNameCtrl,
       _billNumberCtrl,
       _paymentTermsCtrl,
@@ -272,6 +287,7 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
       if (_billPayer == PayerType.company) {
         _billRecipientNameCtrl.text = company.name;
       }
+      if (_initial == null) _seedTdsFromParty();
     });
   }
 
@@ -289,17 +305,7 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
       if (_billPayer == PayerType.customer) {
         _billRecipientNameCtrl.text = customer.name;
       }
-    });
-  }
-
-  void _onDriverChanged(String id) {
-    final driver = ref.read(driversProvider).firstWhere((d) => d.id == id);
-    setState(() {
-      _driverId = id;
-      _driverName = driver.name;
-      if (driver.vehicleNumber.isNotEmpty) {
-        _vehicleNumberCtrl.text = driver.vehicleNumber;
-      }
+      if (_initial == null) _seedTdsFromParty();
     });
   }
 
@@ -309,14 +315,7 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
       _billRecipientNameCtrl.text = payer == PayerType.company
           ? _companyName
           : _customerName;
-    });
-  }
-
-  void _onBagsOrRateChanged() {
-    setState(() {
-      if (_ratePerBag > 0) {
-        _transportationCharges = _numberOfBags * _ratePerBag;
-      }
+      if (_initial == null) _seedTdsFromParty();
     });
   }
 
@@ -345,7 +344,7 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
           .show('Please enter a valid bag quantity', ToastType.warning);
       return;
     }
-    if (_totalCustomerBill <= 0) {
+    if (_orderTotal <= 0) {
       ref
           .read(toastProvider.notifier)
           .show('Total bill amount must be greater than ₹0', ToastType.warning);
@@ -356,20 +355,6 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
         ? _lrNumberCtrl.text
         : _orderNumber;
     final vehicleNumber = _vehicleNumberCtrl.text;
-
-    DriverPaymentStatus driverPaymentStatus;
-    if (_driverPaidAmount >= _driverFreight && _driverFreight > 0) {
-      driverPaymentStatus = DriverPaymentStatus.paidInFull;
-    } else if (_driverPaidAmount > 0) {
-      driverPaymentStatus = DriverPaymentStatus.advancePaid;
-    } else {
-      driverPaymentStatus = DriverPaymentStatus.unpaid;
-    }
-
-    final driverBillNumber = _driverBillNumberCtrl.text.isNotEmpty
-        ? _driverBillNumberCtrl.text
-        : 'DB-${vehicleNumber.length >= 4 ? vehicleNumber.substring(vehicleNumber.length - 4) : vehicleNumber}/'
-              '${_orderNumber.length >= 3 ? _orderNumber.substring(_orderNumber.length - 3) : _orderNumber}';
 
     final payload = Order(
       id: _initial?.id ?? '',
@@ -388,8 +373,6 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
       deliveryLocation: _deliveryLocationCtrl.text,
       vehicleNumber: vehicleNumber,
       invoiceDetails: _invoiceDetailsCtrl.text,
-      driverId: _driverId.isNotEmpty ? _driverId : 'drv-custom',
-      driverName: _driverName,
       numberOfBags: _numberOfBags,
       bagType: _goodsDescriptionCtrl.text,
       goodsDescription: _goodsDescriptionCtrl.text,
@@ -400,23 +383,11 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
       orderStatus: status,
       paymentStatus: _initial?.paymentStatus ?? PaymentStatus.unpaid,
       amountReceived: _initial?.amountReceived ?? 0,
-      charges: OrderCharges(
+      charges: OrderCharges(totalCustomerBill: _orderTotal),
+      expenses: OrderExpenses(
         loadingCharges: _loadingCharges,
         transportationCharges: _transportationCharges,
         otherCharges: _otherCharges,
-        totalCustomerBill: _totalCustomerBill,
-      ),
-      driverExpense: DriverExpense(
-        driverId: _driverId.isNotEmpty ? _driverId : 'drv-custom',
-        driverName: _driverName,
-        driverFreight: _driverFreight,
-        driverPaidAmount: _driverPaidAmount,
-        driverPaymentStatus: driverPaymentStatus,
-        driverBillNumber: driverBillNumber,
-        driverBillDate: _driverBillDate,
-        driverBillAttachment: _driverBillAttachmentName,
-        additionalLoadingExpense: _additionalLoadingExpense,
-        otherTransportExpense: _otherTransportExpense,
       ),
       billing: BillingDetails(
         billPayer: _billPayer,
@@ -434,16 +405,11 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
         notes: _billingNotesCtrl.text,
       ),
       financialSummary: FinancialSummary(
-        grossBill: _totalCustomerBill,
-        driverExpenseTotal: _driverFreight,
-        otherExpenseTotal: _additionalLoadingExpense + _otherTransportExpense,
+        grossBill: _orderTotal,
+        totalExpenses: _totalExpenses,
         expectedTds: _tdsAmount,
         expectedNetReceipt: _netExpectedReceipt,
-        estimatedProfit:
-            _totalCustomerBill -
-            _driverFreight -
-            _additionalLoadingExpense -
-            _otherTransportExpense,
+        estimatedProfit: _netProfit,
       ),
       createdAt: _initial?.createdAt ?? '',
       updatedAt: _initial?.updatedAt ?? '',
@@ -465,13 +431,7 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
   Widget build(BuildContext context) {
     final companies = ref.watch(companiesProvider);
     final customers = ref.watch(customersProvider);
-    final drivers = ref.watch(driversProvider);
     final orders = ref.watch(ordersProvider);
-    final estimatedProfit =
-        _totalCustomerBill -
-        _driverFreight -
-        _additionalLoadingExpense -
-        _otherTransportExpense;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -486,10 +446,9 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
         _LiveBillSummary(
           numberOfBags: _numberOfBags,
           ratePerBag: _ratePerBag,
-          totalCustomerBill: _totalCustomerBill,
-          driverFreight: _driverFreight,
-          driverPaidAmount: _driverPaidAmount,
-          estimatedProfit: estimatedProfit,
+          orderTotal: _orderTotal,
+          totalExpenses: _totalExpenses,
+          netProfit: _netProfit,
         ),
         const SizedBox(height: 12),
         _AccordionSection(
@@ -499,14 +458,13 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
           isOpen: _openSection == _Section.details,
           onToggle: () => setState(
             () => _openSection = _openSection == _Section.details
-                ? _Section.charges
+                ? _Section.expenses
                 : _Section.details,
           ),
           child: _Section1Details(
             state: this,
             companies: companies,
             customers: customers,
-            drivers: drivers,
             orders: orders,
           ),
         ),
@@ -514,40 +472,27 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
         _AccordionSection(
           index: 2,
           color: const Color(0xFF059669),
-          title: 'Section 2: Bill Summary & Additional Charges',
-          isOpen: _openSection == _Section.charges,
+          title: 'Section 2: Trip Expenses & Profit',
+          isOpen: _openSection == _Section.expenses,
           onToggle: () => setState(
-            () => _openSection = _openSection == _Section.charges
-                ? _Section.driver
-                : _Section.charges,
+            () => _openSection = _openSection == _Section.expenses
+                ? _Section.billing
+                : _Section.expenses,
           ),
-          child: _Section2Charges(state: this),
+          child: _Section2Expenses(state: this),
         ),
         const SizedBox(height: 12),
         _AccordionSection(
           index: 3,
-          color: const Color(0xFFD97706),
-          title: 'Section 3: Driver Freight & Advance Expense',
-          isOpen: _openSection == _Section.driver,
-          onToggle: () => setState(
-            () => _openSection = _openSection == _Section.driver
-                ? _Section.billing
-                : _Section.driver,
-          ),
-          child: _Section3Driver(state: this),
-        ),
-        const SizedBox(height: 12),
-        _AccordionSection(
-          index: 4,
           color: const Color(0xFF4F46E5),
-          title: 'Section 4: Billing, TDS & Bank Terms',
+          title: 'Section 3: Billing, TDS & Bank Terms',
           isOpen: _openSection == _Section.billing,
           onToggle: () => setState(
             () => _openSection = _openSection == _Section.billing
                 ? _Section.details
                 : _Section.billing,
           ),
-          child: _Section4Billing(state: this),
+          child: _Section3Billing(state: this),
         ),
         const SizedBox(height: 16),
         Row(
@@ -667,18 +612,16 @@ class _LiveBillSummary extends StatelessWidget {
   const _LiveBillSummary({
     required this.numberOfBags,
     required this.ratePerBag,
-    required this.totalCustomerBill,
-    required this.driverFreight,
-    required this.driverPaidAmount,
-    required this.estimatedProfit,
+    required this.orderTotal,
+    required this.totalExpenses,
+    required this.netProfit,
   });
 
   final int numberOfBags;
   final double ratePerBag;
-  final double totalCustomerBill;
-  final double driverFreight;
-  final double driverPaidAmount;
-  final double estimatedProfit;
+  final double orderTotal;
+  final double totalExpenses;
+  final double netProfit;
 
   @override
   Widget build(BuildContext context) {
@@ -713,31 +656,24 @@ class _LiveBillSummary extends StatelessWidget {
             children: [
               Expanded(
                 child: _MiniStat(
-                  'Customer Bill',
-                  formatINR(totalCustomerBill),
+                  'Order Total',
+                  formatINR(orderTotal),
                   Colors.white,
                   big: true,
                 ),
               ),
               Expanded(
                 child: _MiniStat(
-                  'Driver Freight',
-                  formatINR(driverFreight),
+                  'Total Expenses',
+                  formatINR(totalExpenses),
                   const Color(0xFFFCD34D),
                 ),
               ),
               Expanded(
                 child: _MiniStat(
-                  'Advance Paid',
-                  formatINR(driverPaidAmount),
-                  const Color(0xFF7DD3FC),
-                ),
-              ),
-              Expanded(
-                child: _MiniStat(
-                  'Est. Profit',
-                  formatINR(estimatedProfit),
-                  estimatedProfit >= 0
+                  netProfit >= 0 ? 'Net Profit' : 'Net Loss',
+                  formatINR(netProfit),
+                  netProfit >= 0
                       ? const Color(0xFF34D399)
                       : const Color(0xFFFCA5A5),
                   big: true,
@@ -899,14 +835,12 @@ class _Section1Details extends StatelessWidget {
     required this.state,
     required this.companies,
     required this.customers,
-    required this.drivers,
     required this.orders,
   });
 
   final _CreateOrderScreenState state;
   final List<Company> companies;
   final List<Customer> customers;
-  final List<Driver> drivers;
   final List<Order> orders;
 
   @override
@@ -1093,60 +1027,11 @@ class _Section1Details extends StatelessWidget {
           decoration: _fieldDecoration(),
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _FieldLabel('Vehicle Number *'),
-                  Builder(builder: (context) {
-                    final driverMatches = drivers.where((d) => d.id == state._driverId);
-                    final vehicles = driverMatches.isNotEmpty ? driverMatches.first.allVehicleNumbers : const <String>[];
-                    return DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      initialValue: vehicles.contains(state._vehicleNumberCtrl.text) ? state._vehicleNumberCtrl.text : null,
-                      decoration: _fieldDecoration(hint: vehicles.isEmpty ? 'Select a driver first' : null),
-                      items: [
-                        for (final v in vehicles)
-                          DropdownMenuItem(value: v, child: Text(v, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold))),
-                      ],
-                      onChanged: vehicles.isEmpty ? null : (v) => state.applyChange(() => state._vehicleNumberCtrl.text = v!),
-                    );
-                  }),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _FieldLabel('Driver Name'),
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    initialValue: drivers.any((d) => d.id == state._driverId)
-                        ? state._driverId
-                        : null,
-                    decoration: _fieldDecoration(),
-                    items: [
-                      for (final d in drivers)
-                        DropdownMenuItem(
-                          value: d.id,
-                          child: Text(
-                            '${d.name} (${d.vehicleNumber})',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) state._onDriverChanged(v);
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
+        const _FieldLabel('Vehicle Number *'),
+        TextField(
+          controller: state._vehicleNumberCtrl,
+          style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold),
+          decoration: _fieldDecoration(hint: 'e.g. TN30Y4407'),
         ),
         const SizedBox(height: 12),
         Container(
@@ -1168,7 +1053,7 @@ class _Section1Details extends StatelessWidget {
                   ),
                   SizedBox(width: 6),
                   Text(
-                    'Goods & Freight Billing Math',
+                    'Goods & Order Total',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                 ],
@@ -1198,8 +1083,8 @@ class _Section1Details extends StatelessWidget {
           width: double.infinity,
           child: OutlinedButton(
             onPressed: () =>
-                state.applyChange(() => state._openSection = _Section.charges),
-            child: const Text('Next: Check Other Charges →'),
+                state.applyChange(() => state._openSection = _Section.expenses),
+            child: const Text('Next: Trip Expenses & Profit →'),
           ),
         ),
       ],
@@ -1225,15 +1110,15 @@ class _GoodsMathRowState extends State<_GoodsMathRow> {
         ? '${widget.state._ratePerBag.round()}'
         : '${widget.state._ratePerBag}',
   );
-  late final _freightCtrl = TextEditingController(
-    text: '${widget.state._transportationCharges.round()}',
+  late final _totalCtrl = TextEditingController(
+    text: '${widget.state._orderTotal.round()}',
   );
 
   @override
   void dispose() {
     _bagsCtrl.dispose();
     _rateCtrl.dispose();
-    _freightCtrl.dispose();
+    _totalCtrl.dispose();
     super.dispose();
   }
 
@@ -1257,10 +1142,8 @@ class _GoodsMathRowState extends State<_GoodsMathRow> {
                 onChanged: (v) {
                   widget.state.applyChange(() {
                     widget.state._numberOfBags = int.tryParse(v) ?? 0;
-                    widget.state._onBagsOrRateChanged();
                   });
-                  _freightCtrl.text =
-                      '${widget.state._transportationCharges.round()}';
+                  _totalCtrl.text = '${widget.state._orderTotal.round()}';
                 },
               ),
             ],
@@ -1283,10 +1166,8 @@ class _GoodsMathRowState extends State<_GoodsMathRow> {
                 onChanged: (v) {
                   widget.state.applyChange(() {
                     widget.state._ratePerBag = double.tryParse(v) ?? 0;
-                    widget.state._onBagsOrRateChanged();
                   });
-                  _freightCtrl.text =
-                      '${widget.state._transportationCharges.round()}';
+                  _totalCtrl.text = '${widget.state._orderTotal.round()}';
                 },
               ),
             ],
@@ -1297,20 +1178,16 @@ class _GoodsMathRowState extends State<_GoodsMathRow> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _FieldLabel('Total Freight (₹)'),
+              const _FieldLabel('Order Total (₹)'),
               TextField(
-                controller: _freightCtrl,
-                keyboardType: TextInputType.number,
+                controller: _totalCtrl,
+                readOnly: true,
                 style: const TextStyle(
                   fontFamily: 'monospace',
                   fontWeight: FontWeight.w900,
                   color: Color(0xFF0369A1),
                 ),
-                decoration: _fieldDecoration(hint: '5500'),
-                onChanged: (v) => widget.state.applyChange(
-                  () => widget.state._transportationCharges =
-                      double.tryParse(v) ?? 0,
-                ),
+                decoration: _fieldDecoration().copyWith(fillColor: const Color(0xFFF1F5F9)),
               ),
             ],
           ),
@@ -1320,13 +1197,14 @@ class _GoodsMathRowState extends State<_GoodsMathRow> {
   }
 }
 
-class _Section2Charges extends StatelessWidget {
-  const _Section2Charges({required this.state});
+class _Section2Expenses extends StatelessWidget {
+  const _Section2Expenses({required this.state});
 
   final _CreateOrderScreenState state;
 
   @override
   Widget build(BuildContext context) {
+    final netProfit = state._netProfit;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1334,7 +1212,7 @@ class _Section2Charges extends StatelessWidget {
           children: [
             Expanded(
               child: _NumberField(
-                label: 'Transportation Charges (₹) *',
+                label: 'Transportation (incl. driver payment) (₹) *',
                 initialValue: state._transportationCharges,
                 onChanged: (v) =>
                     state.applyChange(() => state._transportationCharges = v),
@@ -1364,103 +1242,55 @@ class _Section2Charges extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFECFDF5),
+            color: const Color(0xFFF8FAFC),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFA7F3D0)),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Total Customer Bill Amount:',
+                'Total Expenses:',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF065F46),
+                  color: Color(0xFF334155),
                 ),
               ),
               Text(
-                formatINR(state._totalCustomerBill),
+                formatINR(state._totalExpenses),
                 style: const TextStyle(
                   fontWeight: FontWeight.w900,
                   fontSize: 15,
-                  color: Color(0xFF047857),
+                  color: Color(0xFF334155),
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            onPressed: () =>
-                state.applyChange(() => state._openSection = _Section.driver),
-            child: const Text('Next: Driver Freight & Expenses →'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _Section3Driver extends StatelessWidget {
-  const _Section3Driver({required this.state});
-
-  final _CreateOrderScreenState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final balance = (state._driverFreight - state._driverPaidAmount).clamp(
-      0,
-      double.infinity,
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _NumberField(
-                label: 'Driver Freight (₹) *',
-                initialValue: state._driverFreight,
-                onChanged: (v) =>
-                    state.applyChange(() => state._driverFreight = v),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _NumberField(
-                label: 'Advance Paid to Driver (₹)',
-                initialValue: state._driverPaidAmount,
-                onChanged: (v) =>
-                    state.applyChange(() => state._driverPaidAmount = v),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         Container(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFFFFBEB),
+            color: netProfit >= 0 ? const Color(0xFFECFDF5) : const Color(0xFFFFF1F2),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFFDE68A)),
+            border: Border.all(color: netProfit >= 0 ? const Color(0xFFA7F3D0) : const Color(0xFFFECDD3)),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Driver Balance to be Settled:',
+              Text(
+                netProfit >= 0 ? 'Net Profit for this Order:' : 'Net Loss for this Order:',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF92400E),
+                  color: netProfit >= 0 ? const Color(0xFF065F46) : const Color(0xFFBE123C),
                 ),
               ),
               Text(
-                formatINR(balance),
-                style: const TextStyle(
+                formatINR(netProfit),
+                style: TextStyle(
                   fontWeight: FontWeight.w900,
-                  fontFamily: 'monospace',
+                  fontSize: 15,
+                  color: netProfit >= 0 ? const Color(0xFF047857) : const Color(0xFFBE123C),
                 ),
               ),
             ],
@@ -1480,8 +1310,8 @@ class _Section3Driver extends StatelessWidget {
   }
 }
 
-class _Section4Billing extends StatelessWidget {
-  const _Section4Billing({required this.state});
+class _Section3Billing extends StatelessWidget {
+  const _Section3Billing({required this.state});
 
   final _CreateOrderScreenState state;
 
@@ -1541,6 +1371,38 @@ class _Section4Billing extends StatelessWidget {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Switch(
+                    value: state._tdsApplicable,
+                    onChanged: (v) => state.applyChange(() => state._tdsApplicable = v),
+                  ),
+                  const SizedBox(width: 4),
+                  const Text('TDS Applicable', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                ],
+              ),
+              if (state._tdsApplicable) ...[
+                const SizedBox(height: 4),
+                _NumberField(
+                  label: 'TDS Percentage (%)',
+                  initialValue: state._tdsPercentage,
+                  onChanged: (v) => state.applyChange(() => state._tdsPercentage = v),
+                ),
+              ],
+            ],
+          ),
         ),
         const SizedBox(height: 10),
         Container(

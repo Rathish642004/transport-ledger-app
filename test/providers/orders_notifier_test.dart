@@ -5,12 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_app/models/company.dart';
 import 'package:flutter_app/models/customer.dart';
-import 'package:flutter_app/models/driver.dart';
 import 'package:flutter_app/models/enums.dart';
 import 'package:flutter_app/models/order.dart';
-import 'package:flutter_app/providers/companies_provider.dart';
-import 'package:flutter_app/providers/customers_provider.dart';
-import 'package:flutter_app/providers/drivers_provider.dart';
 import 'package:flutter_app/providers/orders_provider.dart';
 import 'package:flutter_app/storage/hive_boxes.dart';
 
@@ -23,11 +19,6 @@ const _company = Company(
   phone: '000',
   address: 'addr',
   city: 'city',
-  totalOrders: 0,
-  totalBagsDispatched: 0,
-  totalBilled: 0,
-  totalReceived: 0,
-  outstandingBalance: 0,
 );
 
 const _customer = Customer(
@@ -37,29 +28,12 @@ const _customer = Customer(
   phone: '000',
   deliveryAddress: 'addr',
   city: 'city',
-  totalOrders: 0,
-  totalBagsReceived: 0,
-  totalBilled: 0,
-  totalReceived: 0,
-  outstandingBalance: 0,
-);
-
-const _driver = Driver(
-  id: 'drv-1',
-  name: 'Test Driver',
-  phone: '000',
-  vehicleNumber: 'TN00X0000',
-  totalTrips: 0,
-  totalAgreedFreight: 0,
-  totalAmountPaid: 0,
-  outstandingAmount: 0,
 );
 
 Order _newOrderPayload({
   PayerType billPayer = PayerType.customer,
   double totalCustomerBill = 1000,
   double netExpectedReceipt = 1000,
-  double driverFreight = 700,
 }) {
   return Order(
     id: '',
@@ -71,32 +45,15 @@ Order _newOrderPayload({
     customerName: _customer.name,
     pickupLocation: 'A',
     deliveryLocation: 'B',
-    vehicleNumber: _driver.vehicleNumber,
-    driverId: _driver.id,
-    driverName: _driver.name,
+    vehicleNumber: 'TN00X0000',
     numberOfBags: 15,
     bagType: 'Bags',
     notes: '',
     orderStatus: OrderStatus.booked,
     paymentStatus: PaymentStatus.unpaid,
     amountReceived: 0,
-    charges: OrderCharges(
-      loadingCharges: 0,
-      transportationCharges: totalCustomerBill,
-      otherCharges: 0,
-      totalCustomerBill: totalCustomerBill,
-    ),
-    driverExpense: DriverExpense(
-      driverId: _driver.id,
-      driverName: _driver.name,
-      driverFreight: driverFreight,
-      driverPaidAmount: 0,
-      driverPaymentStatus: DriverPaymentStatus.unpaid,
-      driverBillNumber: '',
-      driverBillDate: '2026-01-01',
-      additionalLoadingExpense: 0,
-      otherTransportExpense: 0,
-    ),
+    charges: OrderCharges(totalCustomerBill: totalCustomerBill),
+    expenses: const OrderExpenses(loadingCharges: 0, transportationCharges: 700, otherCharges: 0),
     billing: BillingDetails(
       billPayer: billPayer,
       billRecipientName: 'x',
@@ -112,8 +69,7 @@ Order _newOrderPayload({
     ),
     financialSummary: const FinancialSummary(
       grossBill: 0,
-      driverExpenseTotal: 0,
-      otherExpenseTotal: 0,
+      totalExpenses: 0,
       expectedTds: 0,
       expectedNetReceipt: 0,
       estimatedProfit: 0,
@@ -131,7 +87,6 @@ void main() {
     tempDir = await openTestHive();
     await companiesBox.put(_company.id, _company);
     await customersBox.put(_customer.id, _customer);
-    await driversBox.put(_driver.id, _driver);
     container = ProviderContainer();
   });
 
@@ -140,30 +95,14 @@ void main() {
     await closeTestHive(tempDir);
   });
 
-  test('createOrder assigns id/timestamps and fans out to company/customer/driver stats', () {
-    final payload = _newOrderPayload(billPayer: PayerType.company, totalCustomerBill: 5000, netExpectedReceipt: 5000, driverFreight: 3000);
+  test('createOrder assigns id/timestamps', () {
+    final payload = _newOrderPayload(billPayer: PayerType.company, totalCustomerBill: 5000, netExpectedReceipt: 5000);
     final created = container.read(ordersProvider.notifier).createOrder(payload);
 
     expect(created.id, isNotEmpty);
     expect(created.createdAt, isNotEmpty);
     expect(created.updatedAt, isNotEmpty);
     expect(container.read(ordersProvider), contains(created));
-
-    final company = container.read(companiesProvider).firstWhere((c) => c.id == 'comp-1');
-    expect(company.totalOrders, 1);
-    expect(company.totalBagsDispatched, 15);
-    expect(company.totalBilled, 5000); // billPayer == company, so billed/outstanding update
-    expect(company.outstandingBalance, 5000);
-
-    final customer = container.read(customersProvider).firstWhere((c) => c.id == 'cust-1');
-    expect(customer.totalOrders, 1);
-    expect(customer.totalBagsReceived, 15);
-    expect(customer.totalBilled, 0); // not the bill payer, so untouched
-
-    final driver = container.read(driversProvider).firstWhere((d) => d.id == 'drv-1');
-    expect(driver.totalTrips, 1);
-    expect(driver.totalAgreedFreight, 3000);
-    expect(driver.outstandingAmount, 3000);
   });
 
   test('updateOrder preserves id/createdAt and bumps updatedAt', () {
@@ -215,10 +154,10 @@ void main() {
     expect(updated.notesHistory, isEmpty);
   });
 
-  group('applyPaymentReceived payment-status thresholds', () {
+  group('recomputeFromAllocations payment-status thresholds', () {
     test('partial payment -> Partially Paid', () {
       final created = container.read(ordersProvider.notifier).createOrder(_newOrderPayload(totalCustomerBill: 1000, netExpectedReceipt: 1000));
-      container.read(ordersProvider.notifier).applyPaymentReceived(orderId: created.id, orderNumber: null, amountReceived: 400);
+      container.read(ordersProvider.notifier).recomputeFromAllocations({created.id}, {created.id: 400});
 
       final updated = container.read(ordersProvider).firstWhere((o) => o.id == created.id);
       expect(updated.paymentStatus, PaymentStatus.partiallyPaid);
@@ -227,7 +166,7 @@ void main() {
 
     test('payment reaching the full receivable -> Paid', () {
       final created = container.read(ordersProvider.notifier).createOrder(_newOrderPayload(totalCustomerBill: 1000, netExpectedReceipt: 1000));
-      container.read(ordersProvider.notifier).applyPaymentReceived(orderId: created.id, orderNumber: null, amountReceived: 1000);
+      container.read(ordersProvider.notifier).recomputeFromAllocations({created.id}, {created.id: 1000});
 
       final updated = container.read(ordersProvider).firstWhere((o) => o.id == created.id);
       expect(updated.paymentStatus, PaymentStatus.paid);
@@ -235,49 +174,20 @@ void main() {
 
     test('overpayment still resolves to Paid (>= threshold)', () {
       final created = container.read(ordersProvider.notifier).createOrder(_newOrderPayload(totalCustomerBill: 1000, netExpectedReceipt: 1000));
-      container.read(ordersProvider.notifier).applyPaymentReceived(orderId: created.id, orderNumber: null, amountReceived: 1500);
+      container.read(ordersProvider.notifier).recomputeFromAllocations({created.id}, {created.id: 1500});
 
       final updated = container.read(ordersProvider).firstWhere((o) => o.id == created.id);
       expect(updated.paymentStatus, PaymentStatus.paid);
     });
-  });
 
-  group('applyDriverPayment driver-payment-status thresholds', () {
-    test('first partial payment -> Advance Paid', () {
-      final created = container.read(ordersProvider.notifier).createOrder(_newOrderPayload(driverFreight: 1000));
-      container.read(ordersProvider.notifier).applyDriverPayment(orderId: created.id, orderNumber: null, amountPaid: 300);
-
-      final updated = container.read(ordersProvider).firstWhere((o) => o.id == created.id);
-      expect(updated.driverExpense.driverPaymentStatus, DriverPaymentStatus.advancePaid);
-    });
-
-    test('cumulative payment reaching the agreed freight -> Paid in Full', () {
-      final created = container.read(ordersProvider.notifier).createOrder(_newOrderPayload(driverFreight: 1000));
-      container.read(ordersProvider.notifier).applyDriverPayment(orderId: created.id, orderNumber: null, amountPaid: 300);
-      container.read(ordersProvider.notifier).applyDriverPayment(orderId: created.id, orderNumber: null, amountPaid: 700);
+    test('recompute is idempotent — it always rewrites from the given total, never a delta', () {
+      final created = container.read(ordersProvider.notifier).createOrder(_newOrderPayload(totalCustomerBill: 1000, netExpectedReceipt: 1000));
+      container.read(ordersProvider.notifier).recomputeFromAllocations({created.id}, {created.id: 400});
+      container.read(ordersProvider.notifier).recomputeFromAllocations({created.id}, {created.id: 900});
 
       final updated = container.read(ordersProvider).firstWhere((o) => o.id == created.id);
-      expect(updated.driverExpense.driverPaymentStatus, DriverPaymentStatus.paidInFull);
-      expect(updated.driverExpense.driverPaidAmount, 1000);
-    });
-
-    test('empty driverBillNumber/billAttachmentName do not clobber existing values', () {
-      final created = container.read(ordersProvider.notifier).createOrder(_newOrderPayload(driverFreight: 1000));
-      container.read(ordersProvider.notifier).applyDriverPayment(
-            orderId: created.id,
-            orderNumber: null,
-            amountPaid: 300,
-            driverBillNumber: 'DB-123',
-          );
-      container.read(ordersProvider.notifier).applyDriverPayment(
-            orderId: created.id,
-            orderNumber: null,
-            amountPaid: 100,
-            driverBillNumber: '', // falsy -> should keep 'DB-123'
-          );
-
-      final updated = container.read(ordersProvider).firstWhere((o) => o.id == created.id);
-      expect(updated.driverExpense.driverBillNumber, 'DB-123');
+      expect(updated.amountReceived, 900);
+      expect(updated.paymentStatus, PaymentStatus.partiallyPaid);
     });
   });
 }

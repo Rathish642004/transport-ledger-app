@@ -40,40 +40,91 @@ class OrderNoteItem {
       };
 }
 
-/// Mirrors `src/types.ts` `OrderCharges`.
+/// The customer/company bill for an order — always `numberOfBags * ratePerBag`.
+/// Kept as its own class (rather than a bare `double` on [Order]) for JSON/Hive
+/// continuity with the previous shape, which summed three charge fields.
 class OrderCharges {
-  const OrderCharges({
+  const OrderCharges({required this.totalCustomerBill});
+
+  final double totalCustomerBill;
+
+  OrderCharges copyWith({double? totalCustomerBill}) {
+    return OrderCharges(totalCustomerBill: totalCustomerBill ?? this.totalCustomerBill);
+  }
+
+  /// Reads the current single-field shape, falling back to summing the
+  /// pre-restructure `loadingCharges + transportationCharges + otherCharges`
+  /// for records persisted before the order-money model changed.
+  factory OrderCharges.fromJson(Map<String, dynamic> json) {
+    final total = json['totalCustomerBill'] as num?;
+    if (total != null) {
+      return OrderCharges(totalCustomerBill: total.toDouble());
+    }
+    final loading = (json['loadingCharges'] as num?)?.toDouble() ?? 0;
+    final transportation = (json['transportationCharges'] as num?)?.toDouble() ?? 0;
+    final other = (json['otherCharges'] as num?)?.toDouble() ?? 0;
+    return OrderCharges(totalCustomerBill: loading + transportation + other);
+  }
+
+  Map<String, dynamic> toJson() => {'totalCustomerBill': totalCustomerBill};
+}
+
+/// The expenses incurred for an order — subtracted from [OrderCharges] to
+/// give the order's profit, which may be negative. Transportation charges
+/// are inclusive of driver payment; there is no separate driver ledger.
+class OrderExpenses {
+  const OrderExpenses({
     required this.loadingCharges,
     required this.transportationCharges,
     required this.otherCharges,
-    required this.totalCustomerBill,
   });
+
+  const OrderExpenses.zero()
+      : loadingCharges = 0,
+        transportationCharges = 0,
+        otherCharges = 0;
 
   final double loadingCharges;
   final double transportationCharges;
   final double otherCharges;
-  final double totalCustomerBill;
 
-  OrderCharges copyWith({
+  double get total => loadingCharges + transportationCharges + otherCharges;
+
+  OrderExpenses copyWith({
     double? loadingCharges,
     double? transportationCharges,
     double? otherCharges,
-    double? totalCustomerBill,
   }) {
-    return OrderCharges(
+    return OrderExpenses(
       loadingCharges: loadingCharges ?? this.loadingCharges,
       transportationCharges: transportationCharges ?? this.transportationCharges,
       otherCharges: otherCharges ?? this.otherCharges,
-      totalCustomerBill: totalCustomerBill ?? this.totalCustomerBill,
     );
   }
 
-  factory OrderCharges.fromJson(Map<String, dynamic> json) {
-    return OrderCharges(
-      loadingCharges: (json['loadingCharges'] as num).toDouble(),
-      transportationCharges: (json['transportationCharges'] as num).toDouble(),
-      otherCharges: (json['otherCharges'] as num).toDouble(),
-      totalCustomerBill: (json['totalCustomerBill'] as num).toDouble(),
+  factory OrderExpenses.fromJson(Map<String, dynamic> json) {
+    return OrderExpenses(
+      loadingCharges: (json['loadingCharges'] as num?)?.toDouble() ?? 0,
+      transportationCharges: (json['transportationCharges'] as num?)?.toDouble() ?? 0,
+      otherCharges: (json['otherCharges'] as num?)?.toDouble() ?? 0,
+    );
+  }
+
+  /// Maps the removed per-order `DriverExpense` shape onto the new expense
+  /// categories, so a record persisted before the driver feature was removed
+  /// still carries its money forward: the driver's freight and other
+  /// transport expense both count as transportation expense (driver payment
+  /// is no longer tracked separately), and the additional loading expense
+  /// counts as loading expense.
+  factory OrderExpenses.fromLegacyDriverExpense(Map<String, dynamic>? json) {
+    if (json == null) return const OrderExpenses.zero();
+    final driverFreight = (json['driverFreight'] as num?)?.toDouble() ?? 0;
+    final otherTransportExpense = (json['otherTransportExpense'] as num?)?.toDouble() ?? 0;
+    final additionalLoadingExpense = (json['additionalLoadingExpense'] as num?)?.toDouble() ?? 0;
+    return OrderExpenses(
+      loadingCharges: additionalLoadingExpense,
+      transportationCharges: driverFreight + otherTransportExpense,
+      otherCharges: 0,
     );
   }
 
@@ -81,88 +132,6 @@ class OrderCharges {
         'loadingCharges': loadingCharges,
         'transportationCharges': transportationCharges,
         'otherCharges': otherCharges,
-        'totalCustomerBill': totalCustomerBill,
-      };
-}
-
-/// Mirrors `src/types.ts` `DriverExpense`.
-class DriverExpense {
-  const DriverExpense({
-    required this.driverId,
-    required this.driverName,
-    required this.driverFreight,
-    required this.driverPaidAmount,
-    required this.driverPaymentStatus,
-    required this.driverBillNumber,
-    required this.driverBillDate,
-    this.driverBillAttachment,
-    required this.additionalLoadingExpense,
-    required this.otherTransportExpense,
-  });
-
-  final String driverId;
-  final String driverName;
-  final double driverFreight;
-  final double driverPaidAmount;
-  final DriverPaymentStatus driverPaymentStatus;
-  final String driverBillNumber;
-  final String driverBillDate;
-  final String? driverBillAttachment;
-  final double additionalLoadingExpense;
-  final double otherTransportExpense;
-
-  DriverExpense copyWith({
-    String? driverId,
-    String? driverName,
-    double? driverFreight,
-    double? driverPaidAmount,
-    DriverPaymentStatus? driverPaymentStatus,
-    String? driverBillNumber,
-    String? driverBillDate,
-    String? driverBillAttachment,
-    double? additionalLoadingExpense,
-    double? otherTransportExpense,
-  }) {
-    return DriverExpense(
-      driverId: driverId ?? this.driverId,
-      driverName: driverName ?? this.driverName,
-      driverFreight: driverFreight ?? this.driverFreight,
-      driverPaidAmount: driverPaidAmount ?? this.driverPaidAmount,
-      driverPaymentStatus: driverPaymentStatus ?? this.driverPaymentStatus,
-      driverBillNumber: driverBillNumber ?? this.driverBillNumber,
-      driverBillDate: driverBillDate ?? this.driverBillDate,
-      driverBillAttachment: driverBillAttachment ?? this.driverBillAttachment,
-      additionalLoadingExpense: additionalLoadingExpense ?? this.additionalLoadingExpense,
-      otherTransportExpense: otherTransportExpense ?? this.otherTransportExpense,
-    );
-  }
-
-  factory DriverExpense.fromJson(Map<String, dynamic> json) {
-    return DriverExpense(
-      driverId: json['driverId'] as String,
-      driverName: json['driverName'] as String,
-      driverFreight: (json['driverFreight'] as num).toDouble(),
-      driverPaidAmount: (json['driverPaidAmount'] as num).toDouble(),
-      driverPaymentStatus: DriverPaymentStatus.fromJson(json['driverPaymentStatus'] as String),
-      driverBillNumber: json['driverBillNumber'] as String,
-      driverBillDate: json['driverBillDate'] as String,
-      driverBillAttachment: json['driverBillAttachment'] as String?,
-      additionalLoadingExpense: (json['additionalLoadingExpense'] as num).toDouble(),
-      otherTransportExpense: (json['otherTransportExpense'] as num).toDouble(),
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-        'driverId': driverId,
-        'driverName': driverName,
-        'driverFreight': driverFreight,
-        'driverPaidAmount': driverPaidAmount,
-        'driverPaymentStatus': driverPaymentStatus.toJson(),
-        'driverBillNumber': driverBillNumber,
-        'driverBillDate': driverBillDate,
-        if (driverBillAttachment != null) 'driverBillAttachment': driverBillAttachment,
-        'additionalLoadingExpense': additionalLoadingExpense,
-        'otherTransportExpense': otherTransportExpense,
       };
 }
 
@@ -253,36 +222,33 @@ class BillingDetails {
       };
 }
 
-/// Mirrors `src/types.ts` `FinancialSummary`.
+/// Mirrors `src/types.ts` `FinancialSummary`. [estimatedProfit] may be
+/// negative — an order's expenses are not capped at its bill amount.
 class FinancialSummary {
   const FinancialSummary({
     required this.grossBill,
-    required this.driverExpenseTotal,
-    required this.otherExpenseTotal,
+    required this.totalExpenses,
     required this.expectedTds,
     required this.expectedNetReceipt,
     required this.estimatedProfit,
   });
 
   final double grossBill;
-  final double driverExpenseTotal;
-  final double otherExpenseTotal;
+  final double totalExpenses;
   final double expectedTds;
   final double expectedNetReceipt;
   final double estimatedProfit;
 
   FinancialSummary copyWith({
     double? grossBill,
-    double? driverExpenseTotal,
-    double? otherExpenseTotal,
+    double? totalExpenses,
     double? expectedTds,
     double? expectedNetReceipt,
     double? estimatedProfit,
   }) {
     return FinancialSummary(
       grossBill: grossBill ?? this.grossBill,
-      driverExpenseTotal: driverExpenseTotal ?? this.driverExpenseTotal,
-      otherExpenseTotal: otherExpenseTotal ?? this.otherExpenseTotal,
+      totalExpenses: totalExpenses ?? this.totalExpenses,
       expectedTds: expectedTds ?? this.expectedTds,
       expectedNetReceipt: expectedNetReceipt ?? this.expectedNetReceipt,
       estimatedProfit: estimatedProfit ?? this.estimatedProfit,
@@ -290,10 +256,12 @@ class FinancialSummary {
   }
 
   factory FinancialSummary.fromJson(Map<String, dynamic> json) {
+    final totalExpenses = json['totalExpenses'] as num? ??
+        ((json['driverExpenseTotal'] as num?)?.toDouble() ?? 0) +
+            ((json['otherExpenseTotal'] as num?)?.toDouble() ?? 0);
     return FinancialSummary(
       grossBill: (json['grossBill'] as num).toDouble(),
-      driverExpenseTotal: (json['driverExpenseTotal'] as num).toDouble(),
-      otherExpenseTotal: (json['otherExpenseTotal'] as num).toDouble(),
+      totalExpenses: totalExpenses.toDouble(),
       expectedTds: (json['expectedTds'] as num).toDouble(),
       expectedNetReceipt: (json['expectedNetReceipt'] as num).toDouble(),
       estimatedProfit: (json['estimatedProfit'] as num).toDouble(),
@@ -302,8 +270,7 @@ class FinancialSummary {
 
   Map<String, dynamic> toJson() => {
         'grossBill': grossBill,
-        'driverExpenseTotal': driverExpenseTotal,
-        'otherExpenseTotal': otherExpenseTotal,
+        'totalExpenses': totalExpenses,
         'expectedTds': expectedTds,
         'expectedNetReceipt': expectedNetReceipt,
         'estimatedProfit': estimatedProfit,
@@ -329,8 +296,6 @@ class Order {
     required this.deliveryLocation,
     required this.vehicleNumber,
     this.invoiceDetails,
-    required this.driverId,
-    required this.driverName,
     required this.numberOfBags,
     required this.bagType,
     this.goodsDescription,
@@ -342,7 +307,7 @@ class Order {
     required this.paymentStatus,
     required this.amountReceived,
     required this.charges,
-    required this.driverExpense,
+    this.expenses,
     required this.billing,
     required this.financialSummary,
     required this.createdAt,
@@ -365,8 +330,6 @@ class Order {
   final String deliveryLocation;
   final String vehicleNumber;
   final String? invoiceDetails;
-  final String driverId;
-  final String driverName;
   final int numberOfBags;
   final String bagType;
   final String? goodsDescription;
@@ -378,11 +341,18 @@ class Order {
   final PaymentStatus paymentStatus;
   final double amountReceived;
   final OrderCharges charges;
-  final DriverExpense driverExpense;
+
+  /// Nullable so records persisted before the order-money restructure (which
+  /// carried expenses under the removed `driverExpense`/charge-split shape)
+  /// still decode — see [orderExpenses] for the non-null accessor everywhere
+  /// else in the app reads from.
+  final OrderExpenses? expenses;
   final BillingDetails billing;
   final FinancialSummary financialSummary;
   final String createdAt;
   final String updatedAt;
+
+  OrderExpenses get orderExpenses => expenses ?? const OrderExpenses.zero();
 
   Order copyWith({
     String? id,
@@ -401,8 +371,6 @@ class Order {
     String? deliveryLocation,
     String? vehicleNumber,
     String? invoiceDetails,
-    String? driverId,
-    String? driverName,
     int? numberOfBags,
     String? bagType,
     String? goodsDescription,
@@ -414,7 +382,7 @@ class Order {
     PaymentStatus? paymentStatus,
     double? amountReceived,
     OrderCharges? charges,
-    DriverExpense? driverExpense,
+    OrderExpenses? expenses,
     BillingDetails? billing,
     FinancialSummary? financialSummary,
     String? createdAt,
@@ -437,8 +405,6 @@ class Order {
       deliveryLocation: deliveryLocation ?? this.deliveryLocation,
       vehicleNumber: vehicleNumber ?? this.vehicleNumber,
       invoiceDetails: invoiceDetails ?? this.invoiceDetails,
-      driverId: driverId ?? this.driverId,
-      driverName: driverName ?? this.driverName,
       numberOfBags: numberOfBags ?? this.numberOfBags,
       bagType: bagType ?? this.bagType,
       goodsDescription: goodsDescription ?? this.goodsDescription,
@@ -450,7 +416,7 @@ class Order {
       paymentStatus: paymentStatus ?? this.paymentStatus,
       amountReceived: amountReceived ?? this.amountReceived,
       charges: charges ?? this.charges,
-      driverExpense: driverExpense ?? this.driverExpense,
+      expenses: expenses ?? this.expenses,
       billing: billing ?? this.billing,
       financialSummary: financialSummary ?? this.financialSummary,
       createdAt: createdAt ?? this.createdAt,
@@ -476,8 +442,6 @@ class Order {
       deliveryLocation: json['deliveryLocation'] as String,
       vehicleNumber: json['vehicleNumber'] as String,
       invoiceDetails: json['invoiceDetails'] as String?,
-      driverId: json['driverId'] as String,
-      driverName: json['driverName'] as String,
       numberOfBags: (json['numberOfBags'] as num).toInt(),
       bagType: json['bagType'] as String,
       goodsDescription: json['goodsDescription'] as String?,
@@ -491,7 +455,9 @@ class Order {
       paymentStatus: PaymentStatus.fromJson(json['paymentStatus'] as String),
       amountReceived: (json['amountReceived'] as num).toDouble(),
       charges: OrderCharges.fromJson(json['charges'] as Map<String, dynamic>),
-      driverExpense: DriverExpense.fromJson(json['driverExpense'] as Map<String, dynamic>),
+      expenses: json['expenses'] != null
+          ? OrderExpenses.fromJson(json['expenses'] as Map<String, dynamic>)
+          : OrderExpenses.fromLegacyDriverExpense(json['driverExpense'] as Map<String, dynamic>?),
       billing: BillingDetails.fromJson(json['billing'] as Map<String, dynamic>),
       financialSummary: FinancialSummary.fromJson(json['financialSummary'] as Map<String, dynamic>),
       createdAt: json['createdAt'] as String,
@@ -516,8 +482,6 @@ class Order {
         'deliveryLocation': deliveryLocation,
         'vehicleNumber': vehicleNumber,
         if (invoiceDetails != null) 'invoiceDetails': invoiceDetails,
-        'driverId': driverId,
-        'driverName': driverName,
         'numberOfBags': numberOfBags,
         'bagType': bagType,
         if (goodsDescription != null) 'goodsDescription': goodsDescription,
@@ -529,7 +493,7 @@ class Order {
         'paymentStatus': paymentStatus.toJson(),
         'amountReceived': amountReceived,
         'charges': charges.toJson(),
-        'driverExpense': driverExpense.toJson(),
+        'expenses': orderExpenses.toJson(),
         'billing': billing.toJson(),
         'financialSummary': financialSummary.toJson(),
         'createdAt': createdAt,

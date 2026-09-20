@@ -1,6 +1,6 @@
 /// Mirrors `src/types.ts` `LedgerTransaction`. Derived/computed only — never
 /// persisted, so no Hive annotations or JSON codec (see `allTransactionsProvider`).
-enum LedgerPartyType { customer, company, driver, operatingExpense }
+enum LedgerPartyType { customer, company, operatingExpense }
 
 enum LedgerEntryType { debit, credit }
 
@@ -10,7 +10,6 @@ extension LedgerPartyTypeLabel on LedgerPartyType {
   String get label => switch (this) {
         LedgerPartyType.customer => 'Customer',
         LedgerPartyType.company => 'Company',
-        LedgerPartyType.driver => 'Driver',
         LedgerPartyType.operatingExpense => 'Operating Expense',
       };
 }

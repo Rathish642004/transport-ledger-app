@@ -8,9 +8,11 @@ class StorageKeys {
   static const orders = 'tl_orders_v2';
   static const companies = 'tl_companies_v2';
   static const customers = 'tl_customers_v2';
+  /// Retired box names — the driver feature was removed. Still referenced by
+  /// `initHive` to delete any on-disk data from before that removal.
   static const drivers = 'tl_drivers_v2';
-  static const payments = 'tl_payments_v2';
   static const driverPayments = 'tl_driver_payments_v2';
+  static const payments = 'tl_payments_v2';
   static const expenses = 'tl_expenses_v2';
   static const profile = 'tl_profile_v2';
   static const backup = 'tl_backup_v2';
@@ -32,9 +34,7 @@ class StorageKeys {
     orders,
     companies,
     customers,
-    drivers,
     payments,
-    driverPayments,
     expenses,
     profile,
     backup,

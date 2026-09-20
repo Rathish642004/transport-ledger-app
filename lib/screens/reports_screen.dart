@@ -47,10 +47,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
         buffer.writeln();
         buffer.writeln('Particulars,Amount (INR)');
         buffer.writeln('Gross Revenue,${_csvNum(p.grossRevenue)}');
-        buffer.writeln('Transportation Freight,${_csvNum(p.freightRevenue)}');
-        buffer.writeln('Loading Charges,${_csvNum(p.loadingRevenue)}');
-        buffer.writeln('Driver Freight Expense,${_csvNum(p.driverFreightExpense)}');
-        buffer.writeln('Other Operating Expenses,${_csvNum(p.otherDirectExpenses)}');
+        buffer.writeln('Transportation Expense (incl. driver payment),${_csvNum(p.transportationExpense)}');
+        buffer.writeln('Loading Expense,${_csvNum(p.loadingExpense)}');
+        buffer.writeln('Other Expense,${_csvNum(p.otherExpense)}');
         buffer.writeln('Total Operating Expenses,${_csvNum(p.totalExpenses)}');
         buffer.writeln('Net Profit,${_csvNum(p.netProfit)}');
       case _ReportType.tds:
@@ -118,24 +117,17 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
 
   _PnlData _pnlData(List<Order> fyOrders) {
     final grossRevenue = fyOrders.fold<double>(0, (s, o) => s + o.charges.totalCustomerBill);
-    final loadingRevenue = fyOrders.fold<double>(0, (s, o) => s + o.charges.loadingCharges);
-    final freightRevenue = fyOrders.fold<double>(0, (s, o) => s + o.charges.transportationCharges);
-    final otherRevenue = fyOrders.fold<double>(0, (s, o) => s + o.charges.otherCharges);
-    final driverFreightExpense = fyOrders.fold<double>(0, (s, o) => s + o.driverExpense.driverFreight);
-    final otherDirectExpenses = fyOrders.fold<double>(
-      0,
-      (s, o) => s + o.driverExpense.additionalLoadingExpense + o.driverExpense.otherTransportExpense,
-    );
-    final totalExpenses = driverFreightExpense + otherDirectExpenses;
+    final transportationExpense = fyOrders.fold<double>(0, (s, o) => s + o.orderExpenses.transportationCharges);
+    final loadingExpense = fyOrders.fold<double>(0, (s, o) => s + o.orderExpenses.loadingCharges);
+    final otherExpense = fyOrders.fold<double>(0, (s, o) => s + o.orderExpenses.otherCharges);
+    final totalExpenses = transportationExpense + loadingExpense + otherExpense;
     final netProfit = grossRevenue - totalExpenses;
     final profitMargin = grossRevenue > 0 ? (netProfit / grossRevenue * 100).toStringAsFixed(1) : '0';
     return _PnlData(
       grossRevenue: grossRevenue,
-      loadingRevenue: loadingRevenue,
-      freightRevenue: freightRevenue,
-      otherRevenue: otherRevenue,
-      driverFreightExpense: driverFreightExpense,
-      otherDirectExpenses: otherDirectExpenses,
+      transportationExpense: transportationExpense,
+      loadingExpense: loadingExpense,
+      otherExpense: otherExpense,
       totalExpenses: totalExpenses,
       netProfit: netProfit,
       profitMargin: profitMargin,
@@ -277,22 +269,18 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
 class _PnlData {
   const _PnlData({
     required this.grossRevenue,
-    required this.loadingRevenue,
-    required this.freightRevenue,
-    required this.otherRevenue,
-    required this.driverFreightExpense,
-    required this.otherDirectExpenses,
+    required this.transportationExpense,
+    required this.loadingExpense,
+    required this.otherExpense,
     required this.totalExpenses,
     required this.netProfit,
     required this.profitMargin,
   });
 
   final double grossRevenue;
-  final double loadingRevenue;
-  final double freightRevenue;
-  final double otherRevenue;
-  final double driverFreightExpense;
-  final double otherDirectExpenses;
+  final double transportationExpense;
+  final double loadingExpense;
+  final double otherExpense;
   final double totalExpenses;
   final double netProfit;
   final String profitMargin;
@@ -442,9 +430,6 @@ class _PnlSection extends StatelessWidget {
                 decoration: const BoxDecoration(border: Border(left: BorderSide(color: Color(0xFFBAE6FD), width: 2))),
                 child: Column(
                   children: [
-                    _LineItem('Transportation Freight Charges', formatINR(data.freightRevenue)),
-                    _LineItem('Loading / Hamali Charges', formatINR(data.loadingRevenue)),
-                    _LineItem('Other Service & Detention Charges', formatINR(data.otherRevenue)),
                     _LineItem('Total Gross Revenue (A)', formatINR(data.grossRevenue), bold: true, topBorder: true, valueColor: const Color(0xFF075985)),
                   ],
                 ),
@@ -457,8 +442,9 @@ class _PnlSection extends StatelessWidget {
                 decoration: const BoxDecoration(border: Border(left: BorderSide(color: Color(0xFFFECDD3), width: 2))),
                 child: Column(
                   children: [
-                    _LineItem('Driver Freight Disbursements', formatINR(data.driverFreightExpense)),
-                    _LineItem('Loading / Unloading Labour & Tolls', formatINR(data.otherDirectExpenses)),
+                    _LineItem('Transportation Expense (incl. driver payment)', formatINR(data.transportationExpense)),
+                    _LineItem('Loading Expense', formatINR(data.loadingExpense)),
+                    _LineItem('Other Expense', formatINR(data.otherExpense)),
                     _LineItem('Total Direct Expenses (B)', formatINR(data.totalExpenses), bold: true, topBorder: true, valueColor: const Color(0xFFBE123C)),
                   ],
                 ),
@@ -724,7 +710,7 @@ class _TripCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final profit = order.financialSummary.estimatedProfit;
     final margin = order.charges.totalCustomerBill > 0 ? (profit / order.charges.totalCustomerBill * 100).toStringAsFixed(0) : '0';
-    final expense = order.driverExpense.additionalLoadingExpense + order.driverExpense.otherTransportExpense;
+    final expenses = order.orderExpenses;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -773,8 +759,8 @@ class _TripCard extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(child: Text('Bill: ${formatINR(order.charges.totalCustomerBill)}', style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)))),
-                Expanded(child: Text('Driver: ${formatINR(order.driverExpense.driverFreight)}', style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)))),
-                Expanded(child: Text('Exp: ${formatINR(expense)}', style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)))),
+                Expanded(child: Text('Transport: ${formatINR(expenses.transportationCharges)}', style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)))),
+                Expanded(child: Text('Exp: ${formatINR(expenses.total)}', style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)))),
               ],
             ),
           ),

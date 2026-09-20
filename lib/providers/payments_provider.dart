@@ -1,14 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/enums.dart';
+import '../models/payment_allocation.dart';
 import '../models/payment_receipt.dart';
 import '../storage/hive_boxes.dart';
-import 'companies_provider.dart';
-import 'customers_provider.dart';
 import 'orders_provider.dart';
 import 'toast_provider.dart';
 
-/// Mirrors `receivePayment` in `LedgerContext.tsx:599-663`.
+/// Mirrors `receivePayment` in `LedgerContext.tsx:599-663`, restructured
+/// around party-level lump-sum payments allocated across many orders (FIFO)
+/// instead of one payment per order. `Order.amountReceived`/`paymentStatus`
+/// are never touched directly here — every mutation ends by recomputing the
+/// affected orders' totals from the full set of receipts via
+/// [OrdersNotifier.recomputeFromAllocations], so there's no delta arithmetic
+/// to get wrong on edit/remove/cascade-delete.
 class PaymentsNotifier extends Notifier<List<PaymentReceipt>> {
   @override
   List<PaymentReceipt> build() => paymentsOrderedIndex.read();
@@ -19,54 +24,68 @@ class PaymentsNotifier extends Notifier<List<PaymentReceipt>> {
     state = next;
   }
 
-  /// `paymentData`'s `id`/`receiptNumber`/`recordedAt` are placeholders — all
-  /// three are overwritten here, matching
-  /// `Omit<PaymentReceipt, 'id'|'receiptNumber'|'recordedAt'>` in the original.
-  PaymentReceipt receivePayment(PaymentReceipt paymentData) {
+  /// Sums every receipt's allocation to each order id, across ALL receipts —
+  /// what `Order.amountReceived` must equal after any payment mutation.
+  Map<String, double> _totalsByOrder(List<PaymentReceipt> receipts) {
+    final totals = <String, double>{};
+    for (final r in receipts) {
+      for (final a in r.allocations) {
+        totals[a.orderId] = (totals[a.orderId] ?? 0) + a.amount;
+      }
+    }
+    return totals;
+  }
+
+  void _recompute(Set<String> orderIds) {
+    if (orderIds.isEmpty) return;
+    ref.read(ordersProvider.notifier).recomputeFromAllocations(orderIds, _totalsByOrder(state));
+  }
+
+  /// Records a party-level payment already allocated (typically via
+  /// `allocateFifo`, possibly adjusted by the user unticking/ticking orders
+  /// in the payment screen) across [allocations]. Anything in
+  /// [amountReceived] beyond the sum of [allocations] becomes unallocated
+  /// credit against the party — see `PaymentReceipt.unallocatedAmount`.
+  PaymentReceipt receivePayment({
+    required String partyId,
+    required PayerType payerType,
+    required String payerName,
+    required double amountReceived,
+    required String paymentDate,
+    required PaymentMethod paymentMethod,
+    required double otherDeduction,
+    required String referenceNumber,
+    required String notes,
+    String? bankAccountId,
+    List<PaymentAllocation> allocations = const [],
+  }) {
     // Note: numbering literally hardcodes "2026" in the source app, not the
     // current year — preserved as-is for parity with LedgerContext.tsx:600.
     final receiptNumber = 'RCT-2026-${(state.length + 43).toString().padLeft(3, '0')}';
-    final newReceipt = paymentData.copyWith(
+    final tdsDeducted = allocations.fold(0.0, (sum, a) => sum + a.tdsSettled);
+    final newReceipt = PaymentReceipt(
       id: 'rct-${DateTime.now().millisecondsSinceEpoch}',
       receiptNumber: receiptNumber,
+      partyId: partyId,
+      payerType: payerType,
+      payerName: payerName,
+      amountReceived: amountReceived,
+      paymentDate: paymentDate,
+      paymentMethod: paymentMethod,
+      tdsDeducted: tdsDeducted,
+      otherDeduction: otherDeduction,
+      referenceNumber: referenceNumber,
+      notes: notes,
       recordedAt: DateTime.now().toIso8601String(),
+      bankAccountId: bankAccountId,
+      allocations: allocations,
     );
 
     _commit([newReceipt, ...state]);
+    _recompute(allocations.map((a) => a.orderId).toSet());
 
-    ref.read(ordersProvider.notifier).applyPaymentReceived(
-          orderId: paymentData.orderId,
-          orderNumber: paymentData.orderNumber,
-          amountReceived: paymentData.amountReceived,
-        );
-
-    if (paymentData.payerType == PayerType.company) {
-      ref.read(companiesProvider.notifier).applyPaymentReceived(paymentData.payerName, paymentData.amountReceived);
-    } else {
-      ref.read(customersProvider.notifier).applyPaymentReceived(paymentData.payerName, paymentData.amountReceived);
-    }
-
-    ref.read(toastProvider.notifier).show('Payment of ₹${paymentData.amountReceived.round()} recorded');
+    ref.read(toastProvider.notifier).show('Payment of ₹${amountReceived.round()} recorded');
     return newReceipt;
-  }
-
-  /// Applies (`sign: 1`) or reverses (`sign: -1`) a receipt's effect on its
-  /// order and payer — the shared arithmetic behind [removePayment],
-  /// [updatePayment], and `OrdersNotifier.deleteOrder`'s cascade delete.
-  /// Negating the same amount that was originally added is enough: the order
-  /// and payer notifiers already re-derive payment status/outstanding
-  /// balance from the running total, not from a separate "undo" path.
-  void _applyEffect(PaymentReceipt payment, double sign) {
-    ref.read(ordersProvider.notifier).applyPaymentReceived(
-          orderId: payment.orderId,
-          orderNumber: payment.orderNumber,
-          amountReceived: sign * payment.amountReceived,
-        );
-    if (payment.payerType == PayerType.company) {
-      ref.read(companiesProvider.notifier).applyPaymentReceived(payment.payerName, sign * payment.amountReceived);
-    } else {
-      ref.read(customersProvider.notifier).applyPaymentReceived(payment.payerName, sign * payment.amountReceived);
-    }
   }
 
   /// Undoes a payment recorded by mistake (including one added after the
@@ -76,27 +95,51 @@ class PaymentsNotifier extends Notifier<List<PaymentReceipt>> {
     final payment = state.where((p) => p.id == id).firstOrNull;
     if (payment == null) return;
 
-    _applyEffect(payment, -1);
+    final affected = payment.allocations.map((a) => a.orderId).toSet();
     // Not `_commit`, which only ever `put`s — never removes the stale entry
     // from the underlying box (see `BanksNotifier.deleteBankAccount`, the
     // same reasoning for a plain box; `paymentsOrderedIndex` is the ordered
     // equivalent).
     paymentsOrderedIndex.delete(id);
     state = state.where((p) => p.id != id).toList();
+    _recompute(affected);
     ref.read(toastProvider.notifier).show('Payment removed', ToastType.info);
   }
 
-  /// Edits an existing receipt in place. Reversing the old amount and
-  /// re-applying the new one (rather than a delta) correctly handles the
-  /// payer or order changing too, not just the amount.
+  /// Edits an existing receipt in place (amount, method, reference, notes,
+  /// and/or its allocations). Recomputes the union of the old and new
+  /// allocations' orders, so an order dropped from the allocation correctly
+  /// reverts too.
   void updatePayment(PaymentReceipt updated) {
     final old = state.where((p) => p.id == updated.id).firstOrNull;
     if (old == null) return;
 
-    _applyEffect(old, -1);
+    final affected = {
+      ...old.allocations.map((a) => a.orderId),
+      ...updated.allocations.map((a) => a.orderId),
+    };
     _commit([for (final p in state) if (p.id == updated.id) updated else p]);
-    _applyEffect(updated, 1);
+    _recompute(affected);
     ref.read(toastProvider.notifier).show('Payment updated');
+  }
+
+  /// Strips [orderId]'s allocation from every receipt that has one, without
+  /// deleting the receipts themselves — the money really was received, so it
+  /// simply becomes unallocated credit against the party. Called when an
+  /// order is deleted, so no receipt is left pointing at a nonexistent order.
+  void stripOrderAllocations(String orderId) {
+    var changed = false;
+    final next = <PaymentReceipt>[];
+    for (final p in state) {
+      if (p.allocations.any((a) => a.orderId == orderId)) {
+        changed = true;
+        next.add(p.copyWith(allocations: [for (final a in p.allocations) if (a.orderId != orderId) a]));
+      } else {
+        next.add(p);
+      }
+    }
+    if (!changed) return;
+    _commit(next);
   }
 }
 

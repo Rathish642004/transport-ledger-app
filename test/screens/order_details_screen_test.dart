@@ -35,16 +35,15 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('shows order header, charge breakdown, and driver payment details from seed data', (tester) async {
+  testWidgets('shows order header, charge breakdown, and profit summary from seed data', (tester) async {
     await pumpOrderDetails(tester, 'ord-kst-162');
 
     expect(find.text('KST/27/162'), findsWidgets);
     expect(find.textContaining('Booked on'), findsOneWidget);
-    // charges: transportationCharges 5500, totalCustomerBill 5500
+    // bill: 55 bags * ₹100/bag = 5500 (gross bill, and net receivable since no TDS).
     expect(find.text('₹5,500'), findsWidgets);
-    // driver freight 4200, paid 3000 -> balance 1200 pending
-    expect(find.text('₹1,200'), findsWidgets);
-    expect(find.text('Pay Driver Dues (₹1,200)'), findsOneWidget);
+    // expenses: transportation 4400 -> profit 1100.
+    expect(find.text('₹1,100'), findsWidgets);
   });
 
   testWidgets('shows "Order not found" for an unknown id', (tester) async {

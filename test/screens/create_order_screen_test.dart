@@ -54,19 +54,14 @@ void main() {
     // Section 1 starts open.
     expect(find.text('LR Number *'), findsOneWidget);
 
-    await tester.tap(find.text('Section 2: Bill Summary & Additional Charges'));
+    await tester.tap(find.text('Section 2: Trip Expenses & Profit'));
     await tester.pumpAndSettle();
     expect(find.text('LR Number *'), findsNothing); // section 1 closed
-    expect(find.text('Total Customer Bill Amount:'), findsOneWidget);
+    expect(find.text('Total Expenses:'), findsOneWidget);
 
-    await tester.tap(find.text('Section 3: Driver Freight & Advance Expense'));
+    await tester.tap(find.text('Section 3: Billing, TDS & Bank Terms'));
     await tester.pumpAndSettle();
-    expect(find.text('Total Customer Bill Amount:'), findsNothing);
-    expect(find.text('Driver Balance to be Settled:'), findsOneWidget);
-
-    await tester.tap(find.text('Section 4: Billing, TDS & Bank Terms'));
-    await tester.pumpAndSettle();
-    expect(find.text('Driver Balance to be Settled:'), findsNothing);
+    expect(find.text('Total Expenses:'), findsNothing);
     expect(find.text('Who will pay the transport bill? *'), findsOneWidget);
 
     // No RenderFlex overflow anywhere in this pass (tester.takeException
@@ -93,7 +88,7 @@ void main() {
     await tester.pump(const Duration(seconds: 4)); // flush updateOrder's toast timer
   });
 
-  testWidgets('changing bags/rate recalculates transportation charges and total bill', (tester) async {
+  testWidgets('changing bags/rate recalculates the read-only order total', (tester) async {
     await pumpApp(tester);
     await tester.tap(find.byType(FloatingActionButton));
     await tester.pumpAndSettle();
@@ -101,11 +96,9 @@ void main() {
     await tester.enterText(find.widgetWithText(TextField, '55'), '10');
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Section 2: Bill Summary & Additional Charges'));
-    await tester.pumpAndSettle();
-
-    // 10 bags * 100/bag (default rate) = 1000.
-    expect(find.text('Total Customer Bill Amount:'), findsOneWidget);
+    // 10 bags * 100/bag (default rate) = 1000, shown read-only in Section 1
+    // and in the Live Bill Summary banner.
+    expect(find.text('1000'), findsOneWidget);
     expect(find.textContaining('₹1,000'), findsWidgets);
   });
 

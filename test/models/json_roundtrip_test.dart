@@ -3,8 +3,6 @@ import 'package:flutter_app/data/seed_data.dart';
 import 'package:flutter_app/models/backup_sync_state.dart';
 import 'package:flutter_app/models/company.dart';
 import 'package:flutter_app/models/customer.dart';
-import 'package:flutter_app/models/driver.dart';
-import 'package:flutter_app/models/driver_payment_record.dart';
 import 'package:flutter_app/models/enums.dart';
 import 'package:flutter_app/models/expense_record.dart';
 import 'package:flutter_app/models/order.dart';
@@ -25,13 +23,6 @@ void main() {
         expect(PaymentStatus.fromJson(v.toJson()), v);
       }
       expect(PaymentStatus.partiallyPaid.toJson(), 'Partially Paid');
-    });
-
-    test('DriverPaymentStatus', () {
-      for (final v in DriverPaymentStatus.values) {
-        expect(DriverPaymentStatus.fromJson(v.toJson()), v);
-      }
-      expect(DriverPaymentStatus.paidInFull.toJson(), 'Paid in Full');
     });
 
     test('PaymentMethod', () {
@@ -69,7 +60,7 @@ void main() {
   });
 
   group('model toJson/fromJson round-trips against seed data', () {
-    test('Order (including nested charges/driverExpense/billing/financialSummary)', () {
+    test('Order (including nested charges/expenses/billing/financialSummary)', () {
       for (final order in initialOrders) {
         final json = order.toJson();
         final restored = Order.fromJson(json);
@@ -89,21 +80,9 @@ void main() {
       }
     });
 
-    test('Driver', () {
-      for (final driver in initialDrivers) {
-        expect(Driver.fromJson(driver.toJson()).toJson(), driver.toJson());
-      }
-    });
-
     test('PaymentReceipt', () {
       for (final receipt in initialPaymentReceipts) {
         expect(PaymentReceipt.fromJson(receipt.toJson()).toJson(), receipt.toJson());
-      }
-    });
-
-    test('DriverPaymentRecord', () {
-      for (final record in initialDriverPayments) {
-        expect(DriverPaymentRecord.fromJson(record.toJson()).toJson(), record.toJson());
       }
     });
 

@@ -4,21 +4,20 @@ import 'backup_sync_state.dart';
 import 'bank_account.dart';
 import 'company.dart';
 import 'customer.dart';
-import 'driver.dart';
-import 'driver_payment_record.dart';
-import 'driver_payout_account.dart';
 import 'enums.dart';
 import 'expense_record.dart';
 import 'order.dart';
+import 'payment_allocation.dart';
 import 'payment_receipt.dart';
 import 'transporter_profile.dart';
 
-// Type IDs are assigned in list order below. DO NOT reorder or remove
-// entries once real data exists on-device — append new types at the end.
+// Type IDs and field indexes are pinned by name in hive_adapters.g.yaml, so
+// removing an entry here does NOT renumber the survivors (verified against
+// that file before making this change) — but still only ever APPEND newly
+// added types, never reuse a retired id/index.
 @GenerateAdapters([
   AdapterSpec<OrderStatus>(),
   AdapterSpec<PaymentStatus>(),
-  AdapterSpec<DriverPaymentStatus>(),
   AdapterSpec<PaymentMethod>(),
   AdapterSpec<PayerType>(),
   AdapterSpec<ExpenseCategory>(),
@@ -26,19 +25,17 @@ import 'transporter_profile.dart';
   AdapterSpec<SyncStatus>(),
   AdapterSpec<OrderNoteItem>(),
   AdapterSpec<OrderCharges>(),
-  AdapterSpec<DriverExpense>(),
   AdapterSpec<BillingDetails>(),
   AdapterSpec<FinancialSummary>(),
   AdapterSpec<Order>(),
   AdapterSpec<Company>(),
   AdapterSpec<Customer>(),
-  AdapterSpec<Driver>(),
   AdapterSpec<PaymentReceipt>(),
-  AdapterSpec<DriverPaymentRecord>(),
   AdapterSpec<ExpenseRecord>(),
   AdapterSpec<TransporterProfile>(),
   AdapterSpec<BackupSyncState>(),
   AdapterSpec<BankAccount>(),
-  AdapterSpec<DriverPayoutAccount>(),
+  AdapterSpec<OrderExpenses>(),
+  AdapterSpec<PaymentAllocation>(),
 ])
 part 'hive_adapters.g.dart';

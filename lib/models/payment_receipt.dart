@@ -1,12 +1,17 @@
 import 'enums.dart';
+import 'payment_allocation.dart';
 
-/// Mirrors `src/types.ts` `PaymentReceipt`.
+/// A party-level payment. One receipt can settle many orders — see
+/// [allocations], filled in FIFO order by `payment_allocation_engine.dart`.
+/// [orderId]/[orderNumber] are kept only for records persisted before this
+/// receipt became party-level (see [PaymentReceipt.fromJson]).
 class PaymentReceipt {
   const PaymentReceipt({
     required this.id,
     required this.receiptNumber,
-    required this.orderId,
-    required this.orderNumber,
+    this.partyId,
+    this.orderId,
+    this.orderNumber,
     required this.payerType,
     required this.payerName,
     required this.amountReceived,
@@ -18,12 +23,18 @@ class PaymentReceipt {
     required this.notes,
     required this.recordedAt,
     this.bankAccountId,
+    this.allocations = const [],
   });
 
   final String id;
   final String receiptNumber;
-  final String orderId;
-  final String orderNumber;
+
+  /// The company/customer id this payment belongs to. Nullable only for
+  /// receipts persisted before party-level payments existed and whose payer
+  /// name could not be resolved to a party during migration.
+  final String? partyId;
+  final String? orderId;
+  final String? orderNumber;
   final PayerType payerType;
   final String payerName;
   final double amountReceived;
@@ -38,9 +49,18 @@ class PaymentReceipt {
   /// `null` for cash or for records created before this field existed.
   final String? bankAccountId;
 
+  /// How this receipt's [amountReceived] was applied across the party's open
+  /// orders, oldest-first. Anything not covered here is unallocated credit —
+  /// see [unallocatedAmount].
+  final List<PaymentAllocation> allocations;
+
+  double get allocatedTotal => allocations.fold(0.0, (sum, a) => sum + a.amount);
+  double get unallocatedAmount => amountReceived - allocatedTotal;
+
   PaymentReceipt copyWith({
     String? id,
     String? receiptNumber,
+    String? partyId,
     String? orderId,
     String? orderNumber,
     PayerType? payerType,
@@ -54,10 +74,12 @@ class PaymentReceipt {
     String? notes,
     String? recordedAt,
     String? bankAccountId,
+    List<PaymentAllocation>? allocations,
   }) {
     return PaymentReceipt(
       id: id ?? this.id,
       receiptNumber: receiptNumber ?? this.receiptNumber,
+      partyId: partyId ?? this.partyId,
       orderId: orderId ?? this.orderId,
       orderNumber: orderNumber ?? this.orderNumber,
       payerType: payerType ?? this.payerType,
@@ -71,18 +93,42 @@ class PaymentReceipt {
       notes: notes ?? this.notes,
       recordedAt: recordedAt ?? this.recordedAt,
       bankAccountId: bankAccountId ?? this.bankAccountId,
+      allocations: allocations ?? this.allocations,
     );
   }
 
   factory PaymentReceipt.fromJson(Map<String, dynamic> json) {
+    final amountReceived = (json['amountReceived'] as num).toDouble();
+    final rawAllocations = json['allocations'] as List<dynamic>?;
+    final legacyOrderId = json['orderId'] as String?;
+
+    List<PaymentAllocation> allocations;
+    if (rawAllocations != null) {
+      allocations = rawAllocations.map((e) => PaymentAllocation.fromJson(e as Map<String, dynamic>)).toList();
+    } else if (legacyOrderId != null && legacyOrderId != 'ord-general') {
+      // Pre-FIFO receipts were always recorded against exactly one order —
+      // synthesize the equivalent single allocation.
+      allocations = [
+        PaymentAllocation(
+          orderId: legacyOrderId,
+          orderNumber: json['orderNumber'] as String? ?? '',
+          amount: amountReceived,
+          tdsSettled: (json['tdsDeducted'] as num?)?.toDouble() ?? 0,
+        ),
+      ];
+    } else {
+      allocations = const [];
+    }
+
     return PaymentReceipt(
       id: json['id'] as String,
       receiptNumber: json['receiptNumber'] as String,
-      orderId: json['orderId'] as String,
-      orderNumber: json['orderNumber'] as String,
+      partyId: json['partyId'] as String?,
+      orderId: legacyOrderId,
+      orderNumber: json['orderNumber'] as String?,
       payerType: PayerType.fromJson(json['payerType'] as String),
       payerName: json['payerName'] as String,
-      amountReceived: (json['amountReceived'] as num).toDouble(),
+      amountReceived: amountReceived,
       paymentDate: json['paymentDate'] as String,
       paymentMethod: PaymentMethod.fromJson(json['paymentMethod'] as String),
       tdsDeducted: (json['tdsDeducted'] as num).toDouble(),
@@ -91,14 +137,16 @@ class PaymentReceipt {
       notes: json['notes'] as String,
       recordedAt: json['recordedAt'] as String,
       bankAccountId: json['bankAccountId'] as String?,
+      allocations: allocations,
     );
   }
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'receiptNumber': receiptNumber,
-        'orderId': orderId,
-        'orderNumber': orderNumber,
+        if (partyId != null) 'partyId': partyId,
+        if (orderId != null) 'orderId': orderId,
+        if (orderNumber != null) 'orderNumber': orderNumber,
         'payerType': payerType.toJson(),
         'payerName': payerName,
         'amountReceived': amountReceived,
@@ -110,5 +158,6 @@ class PaymentReceipt {
         'notes': notes,
         'recordedAt': recordedAt,
         if (bankAccountId != null) 'bankAccountId': bankAccountId,
+        'allocations': allocations.map((a) => a.toJson()).toList(),
       };
 }

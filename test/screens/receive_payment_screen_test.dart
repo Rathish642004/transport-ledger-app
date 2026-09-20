@@ -37,35 +37,71 @@ void main() {
     return router;
   }
 
-  testWidgets('linking to a specific order pre-fills payer, balance due, and amount', (tester) async {
-    await pumpReceivePayment(tester, query: 'orderId=ord-kst-162');
+  testWidgets('linking to a specific company pre-fills its outstanding balance and open orders', (tester) async {
+    await pumpReceivePayment(tester, query: 'partyType=Company&partyId=comp-1');
 
-    // ord-kst-162: billPayer Company, totalCustomerBill 5500, amountReceived 0.
-    expect(find.text('Order #KST/27/162'), findsOneWidget);
-    expect(find.text('₹5,500'), findsWidgets); // gross bill + balance due
-    final amountField = tester.widget<TextField>(find.widgetWithText(TextField, '5500'));
-    expect(amountField.controller?.text, '5500');
+    // comp-1 (PRABHU SPINNING MILLS): ord-kst-161 paid in full (6000/6000),
+    // ord-kst-162 (5500, unpaid) and ord-kst-163 (6000, unpaid) still open ->
+    // outstanding = 5500 + 6000 = 11500.
+    expect(find.text('₹11,500'), findsWidgets);
+    final amountField = tester.widget<TextField>(find.widgetWithText(TextField, '11500'));
+    expect(amountField.controller?.text, '11500');
+    expect(find.textContaining('KST/27/162'), findsOneWidget);
+    expect(find.textContaining('KST/27/163'), findsOneWidget);
   });
 
-  testWidgets('submitting records the payment, updates the order, and navigates to Order Details', (tester) async {
-    await pumpReceivePayment(tester, query: 'orderId=ord-kst-162');
+  testWidgets('submitting the full due amount pays off every open order for that party (FIFO)', (tester) async {
+    await pumpReceivePayment(tester, query: 'partyType=Company&partyId=comp-1');
 
-    await tester.tap(find.text('Confirm & Record ₹5,500'));
+    await tester.tap(find.text('Confirm & Record ₹11,500'));
     await tester.pumpAndSettle();
 
-    expect(paymentsBox.values.any((p) => p.orderId == 'ord-kst-162' && p.amountReceived == 5500), isTrue);
-    final updatedOrder = ordersBox.get('ord-kst-162')!;
-    expect(updatedOrder.amountReceived, 5500);
-    expect(updatedOrder.paymentStatus.jsonValue, 'Paid');
-    expect(find.text('KST/27/162'), findsWidgets); // landed on OrderDetailsScreen
+    expect(paymentsBox.values.any((p) => p.partyId == 'comp-1' && p.amountReceived == 11500), isTrue);
+    expect(ordersBox.get('ord-kst-162')!.paymentStatus.jsonValue, 'Paid');
+    expect(ordersBox.get('ord-kst-163')!.paymentStatus.jsonValue, 'Paid');
 
     await tester.pump(const Duration(seconds: 4)); // flush receivePayment's toast timer
   });
 
-  testWidgets('validation blocks a zero amount with a warning toast', (tester) async {
-    await pumpReceivePayment(tester);
+  testWidgets('a partial payment settles the oldest open order first and leaves the newer one open', (tester) async {
+    await pumpReceivePayment(tester, query: 'partyType=Company&partyId=comp-1');
 
-    await tester.enterText(find.widgetWithText(TextField, '25000'), '0');
+    // Only enough to cover the older order (ord-kst-162, orderDate 09-11),
+    // not the newer one (ord-kst-163, orderDate 09-14).
+    await tester.enterText(find.widgetWithText(TextField, '11500'), '5500');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.textContaining('Confirm & Record'));
+    await tester.pumpAndSettle();
+
+    expect(ordersBox.get('ord-kst-162')!.paymentStatus.jsonValue, 'Paid');
+    expect(ordersBox.get('ord-kst-163')!.paymentStatus.jsonValue, 'Unpaid');
+
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('overpaying leaves the extra as unallocated credit', (tester) async {
+    await pumpReceivePayment(tester, query: 'partyType=Company&partyId=comp-1');
+
+    await tester.enterText(find.widgetWithText(TextField, '11500'), '12000');
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Unallocated'), findsOneWidget);
+    expect(find.text('₹500'), findsWidgets);
+
+    await tester.tap(find.textContaining('Confirm & Record'));
+    await tester.pumpAndSettle();
+
+    final receipt = paymentsBox.values.firstWhere((p) => p.partyId == 'comp-1' && p.amountReceived == 12000);
+    expect(receipt.unallocatedAmount, 500);
+
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('validation blocks a zero amount with a warning toast', (tester) async {
+    await pumpReceivePayment(tester, query: 'partyType=Company&partyId=comp-1');
+
+    await tester.enterText(find.widgetWithText(TextField, '11500'), '0');
     await tester.pumpAndSettle();
 
     final before = paymentsBox.length;
@@ -74,28 +110,6 @@ void main() {
 
     expect(paymentsBox.length, before);
     expect(find.text('Please enter a valid amount received'), findsOneWidget);
-
-    await tester.pump(const Duration(seconds: 4));
-  });
-
-  testWidgets('selecting "General Payment (Unlinked)" then submitting records against ord-general', (tester) async {
-    await pumpReceivePayment(tester);
-
-    // Default selection is the first available order (matches the source's
-    // `initialOrderId || availableOrders[0]?.id || ''`) — explicitly switch
-    // to the unlinked option via the dropdown.
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('-- General Payment (Unlinked) --').last);
-    await tester.pumpAndSettle();
-
-    await tester.enterText(find.widgetWithText(TextField, '25000'), '1000');
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.textContaining('Confirm & Record'));
-    await tester.pumpAndSettle();
-
-    expect(paymentsBox.values.any((p) => p.orderId == 'ord-general' && p.amountReceived == 1000), isTrue);
 
     await tester.pump(const Duration(seconds: 4));
   });

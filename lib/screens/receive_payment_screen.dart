@@ -2,26 +2,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../domain/payment_allocation_engine.dart';
 import '../models/enums.dart';
 import '../models/order.dart';
+import '../models/party_ledger.dart';
+import '../models/payment_allocation.dart';
 import '../models/payment_receipt.dart';
 import '../providers/banks_provider.dart';
 import '../providers/companies_provider.dart';
+import '../providers/customers_provider.dart';
 import '../providers/orders_provider.dart';
+import '../providers/party_ledger_provider.dart';
 import '../providers/payments_provider.dart';
 import '../providers/toast_provider.dart';
 import '../router/app_router.dart';
 import '../utils/formatters.dart';
 import '../widgets/confirmation_dialog.dart';
 
-/// Ported from `src/screens/ReceivePaymentScreen.tsx`. [partyId] is accepted
-/// (matching the resolved navigation payload shape) but — faithfully to the
-/// source — never actually used by the screen; only [orderId]/[partyType]
-/// seed the form.
+/// Party-first payment recording: a customer or company pays one lump sum
+/// covering many orders, tallied FIFO (oldest order first) rather than one
+/// payment per order. [partyId]/[partyType] pre-select the party when
+/// launched from a party card or order details; otherwise the first
+/// available party is used.
 class ReceivePaymentScreen extends ConsumerStatefulWidget {
-  const ReceivePaymentScreen({super.key, this.orderId, this.partyType, this.partyId});
+  const ReceivePaymentScreen({super.key, this.partyType, this.partyId});
 
-  final String? orderId;
   final PayerType? partyType;
   final String? partyId;
 
@@ -31,61 +36,113 @@ class ReceivePaymentScreen extends ConsumerStatefulWidget {
 
 class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
   late PayerType _payerType;
-  late String _selectedOrderId;
-  late final TextEditingController _payerNameCtrl;
+  late String _partyId;
   late final TextEditingController _amountCtrl;
   late String _paymentDate;
   late PaymentMethod _paymentMethod;
-  late final TextEditingController _tdsCtrl;
   late final TextEditingController _otherDeductionCtrl;
   late final TextEditingController _referenceCtrl;
   late final TextEditingController _notesCtrl;
   String? _bankAccountId;
 
-  List<Order> _availableOrders(List<Order> orders) {
-    return orders.where((o) {
-      if (o.orderStatus == OrderStatus.cancelled) return false;
-      final netExpected = o.billing.netExpectedReceipt != 0 ? o.billing.netExpectedReceipt : o.charges.totalCustomerBill;
-      final netDue = netExpected - o.amountReceived;
-      return netDue > 0 || o.id == widget.orderId;
-    }).toList();
-  }
+  /// Orders the user wants this payment applied to — defaults to the
+  /// oldest-first FIFO set that covers the entered amount, but the user can
+  /// untick an older order and tick a newer one instead. Whatever ends up
+  /// ticked is applied oldest-first among the selection.
+  Set<String> _selectedOrderIds = {};
+  bool _selectionManuallyEdited = false;
 
-  Order? _currentOrder(List<Order> orders) {
-    for (final o in orders) {
-      if (o.id == _selectedOrderId) return o;
+  String _partyName(PayerType type, String id) {
+    if (type == PayerType.company) {
+      for (final c in ref.read(companiesProvider)) {
+        if (c.id == id) return c.name;
+      }
+    } else {
+      for (final c in ref.read(customersProvider)) {
+        if (c.id == id) return c.name;
+      }
     }
-    return null;
+    return '';
   }
 
-  double _balanceDue(Order? order) {
-    if (order == null) return 0;
-    final netExpected = order.billing.netExpectedReceipt != 0 ? order.billing.netExpectedReceipt : order.charges.totalCustomerBill;
-    final due = netExpected - order.amountReceived;
-    return due > 0 ? due : 0;
+  PartyLedger _ledger() => ledgerFor(ref.watch(partyLedgerProvider), _payerType, _partyId);
+
+  Set<String> _defaultSelection(double amount, List<Order> openOrders) {
+    final selected = <String>{};
+    var remaining = amount;
+    for (final o in openOrders) {
+      if (remaining <= 0.01) break;
+      final due = expectedReceiptFor(o) - o.amountReceived;
+      if (due <= 0.01) continue;
+      selected.add(o.id);
+      remaining -= due;
+    }
+    return selected;
+  }
+
+  List<PaymentAllocation> _previewAllocations(List<Order> openOrders) {
+    final amount = double.tryParse(_amountCtrl.text) ?? 0;
+    final selectedOrders = openOrders.where((o) => _selectedOrderIds.contains(o.id)).toList();
+    return allocateFifo(
+      openOrders: selectedOrders,
+      alreadyAllocated: {for (final o in selectedOrders) o.id: o.amountReceived},
+      amount: amount,
+    );
+  }
+
+  void _onAmountChanged(String value) {
+    setState(() {
+      if (!_selectionManuallyEdited) {
+        _selectedOrderIds = _defaultSelection(double.tryParse(value) ?? 0, _ledger().openOrders);
+      }
+    });
+  }
+
+  void _toggleOrder(String orderId) {
+    setState(() {
+      _selectionManuallyEdited = true;
+      if (_selectedOrderIds.contains(orderId)) {
+        _selectedOrderIds.remove(orderId);
+      } else {
+        _selectedOrderIds.add(orderId);
+      }
+    });
+  }
+
+  void _onPartyChanged(PayerType type, String id) {
+    setState(() {
+      _payerType = type;
+      _partyId = id;
+      _selectionManuallyEdited = false;
+      final ledger = ledgerFor(ref.read(partyLedgerProvider), type, id);
+      final amount = ledger.outstanding > 0 ? ledger.outstanding : 0.0;
+      _amountCtrl.text = amount > 0 ? '${amount.round()}' : '';
+      _selectedOrderIds = _defaultSelection(amount, ledger.openOrders);
+    });
   }
 
   @override
   void initState() {
     super.initState();
-    final orders = ref.read(ordersProvider);
     final companies = ref.read(companiesProvider);
-    final available = _availableOrders(orders);
+    final customers = ref.read(customersProvider);
 
-    _payerType = widget.partyType ?? PayerType.company;
-    _selectedOrderId = widget.orderId ?? (available.isNotEmpty ? available.first.id : '');
+    _payerType = widget.partyType ?? (companies.isNotEmpty ? PayerType.company : PayerType.customer);
+    if (widget.partyId != null) {
+      _partyId = widget.partyId!;
+    } else if (_payerType == PayerType.company) {
+      _partyId = companies.isNotEmpty ? companies.first.id : '';
+    } else {
+      _partyId = customers.isNotEmpty ? customers.first.id : '';
+    }
 
-    final currentOrder = _currentOrder(orders);
-    final payerName = currentOrder != null
-        ? (currentOrder.billing.billPayer == PayerType.company ? currentOrder.companyName : currentOrder.customerName)
-        : (companies.isNotEmpty ? companies.first.name : '');
-    _payerNameCtrl = TextEditingController(text: payerName);
+    final ledger = ledgerFor(ref.read(partyLedgerProvider), _payerType, _partyId);
+    final amount = ledger.outstanding > 0 ? ledger.outstanding : 0.0;
+    _amountCtrl = TextEditingController(text: amount > 0 ? '${amount.round()}' : '');
+    _selectedOrderIds = _defaultSelection(amount, ledger.openOrders);
 
-    final balanceDue = _balanceDue(currentOrder);
-    _amountCtrl = TextEditingController(text: '${(balanceDue > 0 ? balanceDue : 25000).round()}');
     _paymentDate = getTodayDateString();
     _paymentMethod = PaymentMethod.bankTransfer;
-    _tdsCtrl = TextEditingController(text: '0');
     _otherDeductionCtrl = TextEditingController(text: '0');
     _referenceCtrl = TextEditingController();
     _notesCtrl = TextEditingController();
@@ -95,28 +152,11 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
 
   @override
   void dispose() {
-    _payerNameCtrl.dispose();
     _amountCtrl.dispose();
-    _tdsCtrl.dispose();
     _otherDeductionCtrl.dispose();
     _referenceCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
-  }
-
-  void _handleOrderChange(String orderId, List<Order> orders) {
-    setState(() {
-      _selectedOrderId = orderId;
-      final order = _currentOrder(orders);
-      if (order != null) {
-        _payerType = order.billing.billPayer;
-        _payerNameCtrl.text = order.billing.billRecipientName.isNotEmpty ? order.billing.billRecipientName : order.companyName;
-        _amountCtrl.text = '${_balanceDue(order).round()}';
-        if (order.billing.tdsApplicable) {
-          _tdsCtrl.text = '${order.billing.tdsAmount.round()}';
-        }
-      }
-    });
   }
 
   Future<void> _handleEditPayment(PaymentReceipt payment) async {
@@ -164,69 +204,90 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
       final confirmed = await showConfirmationDialog(
         context,
         title: 'Remove This Payment?',
-        message: 'This reverses the amount from the order and from ${payment.payerName}\'s balance. This cannot be undone.',
+        message: 'This reverses the amount from every order it was applied to and from ${payment.payerName}\'s balance. This cannot be undone.',
         confirmLabel: 'Remove',
         isDestructive: true,
       );
       if (confirmed) ref.read(paymentsProvider.notifier).removePayment(payment.id);
-    } else if (action == 'save') {
-      ref.read(paymentsProvider.notifier).updatePayment(payment.copyWith(
-            amountReceived: double.tryParse(amountCtrl.text) ?? payment.amountReceived,
-            paymentMethod: method,
-            referenceNumber: referenceCtrl.text,
-            notes: notesCtrl.text,
-          ));
+      return;
     }
+    if (action != 'save') return;
+
+    final newAmount = double.tryParse(amountCtrl.text) ?? payment.amountReceived;
+    // Re-run FIFO across exactly the orders this receipt already touched,
+    // excluding this receipt's own prior contribution from "already
+    // allocated" so the new amount is distributed fresh across them.
+    final orders = ref.read(ordersProvider);
+    final touchedOrders = [
+      for (final a in payment.allocations)
+        for (final o in orders)
+          if (o.id == a.orderId) o,
+    ]..sort((a, b) {
+        final byDate = a.orderDate.compareTo(b.orderDate);
+        return byDate != 0 ? byDate : a.createdAt.compareTo(b.createdAt);
+      });
+    final oldByOrder = {for (final a in payment.allocations) a.orderId: a.amount};
+    final newAllocations = allocateFifo(
+      openOrders: touchedOrders,
+      alreadyAllocated: {for (final o in touchedOrders) o.id: o.amountReceived - (oldByOrder[o.id] ?? 0)},
+      amount: newAmount,
+    );
+
+    ref.read(paymentsProvider.notifier).updatePayment(payment.copyWith(
+          amountReceived: newAmount,
+          paymentMethod: method,
+          referenceNumber: referenceCtrl.text,
+          notes: notesCtrl.text,
+          allocations: newAllocations,
+        ));
   }
 
-  void _handleSubmit(Order? currentOrder) {
+  void _handleSubmit(List<Order> openOrders) {
     final amountReceived = double.tryParse(_amountCtrl.text) ?? 0;
     if (amountReceived <= 0) {
       ref.read(toastProvider.notifier).show('Please enter a valid amount received', ToastType.warning);
       return;
     }
-    if (_payerNameCtrl.text.trim().isEmpty) {
-      ref.read(toastProvider.notifier).show('Please specify the Payer Name', ToastType.warning);
+    if (_partyId.isEmpty) {
+      ref.read(toastProvider.notifier).show('Please select who is paying', ToastType.warning);
       return;
     }
 
+    final allocations = _previewAllocations(openOrders);
     ref.read(paymentsProvider.notifier).receivePayment(
-          PaymentReceipt(
-            id: '',
-            receiptNumber: '',
-            orderId: currentOrder?.id ?? 'ord-general',
-            orderNumber: currentOrder?.orderNumber ?? 'GEN-PAY',
-            payerType: _payerType,
-            payerName: _payerNameCtrl.text,
-            amountReceived: amountReceived,
-            paymentDate: _paymentDate,
-            paymentMethod: _paymentMethod,
-            tdsDeducted: double.tryParse(_tdsCtrl.text) ?? 0,
-            otherDeduction: double.tryParse(_otherDeductionCtrl.text) ?? 0,
-            referenceNumber: _referenceCtrl.text,
-            notes: _notesCtrl.text,
-            recordedAt: '',
-            bankAccountId: _bankAccountId,
-          ),
+          partyId: _partyId,
+          payerType: _payerType,
+          payerName: _partyName(_payerType, _partyId),
+          amountReceived: amountReceived,
+          paymentDate: _paymentDate,
+          paymentMethod: _paymentMethod,
+          otherDeduction: double.tryParse(_otherDeductionCtrl.text) ?? 0,
+          referenceNumber: _referenceCtrl.text,
+          notes: _notesCtrl.text,
+          bankAccountId: _bankAccountId,
+          allocations: allocations,
         );
 
-    if (currentOrder != null) {
-      context.pushReplacement(AppRoutes.orderDetailsPath(currentOrder.id));
-    } else {
-      context.pushReplacement(AppRoutes.ledger);
-    }
+    context.pushReplacement(AppRoutes.ledger);
   }
 
   @override
   Widget build(BuildContext context) {
-    final orders = ref.watch(ordersProvider);
-    final payments = ref.watch(paymentsProvider);
+    final companies = ref.watch(companiesProvider);
+    final customers = ref.watch(customersProvider);
     final banks = ref.watch(banksProvider);
-    final currentOrder = _currentOrder(orders);
-    final balanceDue = _balanceDue(currentOrder);
-    final orderPaymentHistory = _selectedOrderId.isEmpty
-        ? <dynamic>[]
-        : payments.where((p) => p.orderId == _selectedOrderId || (currentOrder != null && p.orderNumber == currentOrder.orderNumber)).toList();
+    final payments = ref.watch(paymentsProvider);
+    final ledger = _ledger();
+    final openOrders = ledger.openOrders;
+    final allocations = _previewAllocations(openOrders);
+    final allocatedByOrder = {for (final a in allocations) a.orderId: a};
+    final amountReceived = double.tryParse(_amountCtrl.text) ?? 0;
+    final unallocated = amountReceived - allocations.fold(0.0, (s, a) => s + a.amount);
+    final tdsInThisPayment = allocations.fold(0.0, (s, a) => s + a.tdsSettled);
+
+    final partyHistory = _partyId.isEmpty
+        ? const <PaymentReceipt>[]
+        : payments.where((p) => p.partyId == _partyId && p.payerType == _payerType).toList();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -241,7 +302,7 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('CASH COLLECTION ENTRY', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: const Color(0xFF047857))),
-                    const Text('Record Customer Payment', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                    const Text('Record a Payment', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                   ],
                 ),
               ),
@@ -254,52 +315,6 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
             ],
           ),
         ),
-        if (currentOrder != null) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(20)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Order #${currentOrder.orderNumber}', style: const TextStyle(color: Color(0xFF94A3B8), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11)),
-                    Text('${currentOrder.numberOfBags} Bags', style: const TextStyle(color: Color(0xFF7DD3FC), fontWeight: FontWeight.w600, fontSize: 11)),
-                  ],
-                ),
-                const Divider(height: 14, color: Color(0xFF1E293B)),
-                Row(
-                  children: [
-                    Expanded(child: _StatBlock('Gross Bill', formatINR(currentOrder.charges.totalCustomerBill), Colors.white)),
-                    Expanded(child: _StatBlock('Total Received', formatINR(currentOrder.amountReceived), const Color(0xFF34D399))),
-                    Expanded(child: _StatBlock('Balance Due', formatINR(balanceDue), const Color(0xFFFCD34D))),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (currentOrder.paymentStatus == PaymentStatus.paid) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: const Color(0xFFFFFBEB), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFFDE68A))),
-              child: const Row(
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: Color(0xFFB45309)),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'This order\'s payment is already fully received. You can still record another payment (e.g. a refund adjustment or correction) — it just won\'t be required.',
-                      style: TextStyle(fontSize: 11, color: Color(0xFFB45309), fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
         const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(14),
@@ -307,7 +322,7 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _FieldLabel('Payer Type *'),
+              const _FieldLabel('Who is paying? *'),
               Row(
                 children: [
                   Expanded(
@@ -315,7 +330,7 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                       label: 'Company',
                       icon: Icons.business,
                       selected: _payerType == PayerType.company,
-                      onTap: () => setState(() => _payerType = PayerType.company),
+                      onTap: () => _onPartyChanged(PayerType.company, companies.isNotEmpty ? companies.first.id : ''),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -324,42 +339,74 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                       label: 'Customer',
                       icon: Icons.local_shipping,
                       selected: _payerType == PayerType.customer,
-                      onTap: () => setState(() => _payerType = PayerType.customer),
+                      onTap: () => _onPartyChanged(PayerType.customer, customers.isNotEmpty ? customers.first.id : ''),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 10),
-              const _FieldLabel('Payer Party Name *'),
-              TextField(controller: _payerNameCtrl, decoration: _decoration(hint: 'e.g. Shree Balaji PolyFab Pvt Ltd')),
-              const SizedBox(height: 10),
-              const _FieldLabel('Related Transport Order / Bill'),
+              const _FieldLabel('Party *'),
               DropdownButtonFormField<String>(
                 isExpanded: true,
-                initialValue: orders.any((o) => o.id == _selectedOrderId) ? _selectedOrderId : null,
+                initialValue: _payerType == PayerType.company
+                    ? (companies.any((c) => c.id == _partyId) ? _partyId : null)
+                    : (customers.any((c) => c.id == _partyId) ? _partyId : null),
                 decoration: _decoration(),
-                items: [
-                  const DropdownMenuItem(value: '', child: Text('-- General Payment (Unlinked) --', overflow: TextOverflow.ellipsis)),
-                  for (final o in orders)
-                    DropdownMenuItem(
-                      value: o.id,
-                      child: Text(
-                        '${o.orderNumber} - ${o.companyName} → ${o.customerName} (${formatINR(o.charges.totalCustomerBill)})',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-                onChanged: (v) => _handleOrderChange(v ?? '', orders),
+                items: _payerType == PayerType.company
+                    ? [for (final c in companies) DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis))]
+                    : [for (final c in customers) DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis))],
+                onChanged: (v) {
+                  if (v != null) _onPartyChanged(_payerType, v);
+                },
               ),
-              const SizedBox(height: 10),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(20)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: _StatBlock('Total Billed', formatINR(ledger.totalBilled), Colors.white)),
+                  Expanded(child: _StatBlock('Received', formatINR(ledger.received), const Color(0xFF34D399))),
+                  Expanded(child: _StatBlock('Outstanding', formatINR(ledger.outstanding), const Color(0xFFFCD34D))),
+                ],
+              ),
+              if (ledger.unallocatedCredit > 0) ...[
+                const Divider(height: 14, color: Color(0xFF1E293B)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Unallocated Credit', style: TextStyle(color: Color(0xFF7DD3FC), fontSize: 11, fontWeight: FontWeight.bold)),
+                    Text(formatINR(ledger.unallocatedCredit), style: const TextStyle(color: Color(0xFF7DD3FC), fontSize: 12, fontWeight: FontWeight.w900)),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFE2E8F0))),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('Amount Received (₹) *', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
-                  if (balanceDue > 0)
+                  if (ledger.outstanding > 0)
                     TextButton(
-                      onPressed: () => setState(() => _amountCtrl.text = '${balanceDue.round()}'),
-                      child: Text('Pay Full Due (${formatINR(balanceDue)})', style: const TextStyle(fontSize: 10)),
+                      onPressed: () {
+                        _amountCtrl.text = '${ledger.outstanding.round()}';
+                        _onAmountChanged(_amountCtrl.text);
+                      },
+                      child: Text('Pay Full Due (${formatINR(ledger.outstanding)})', style: const TextStyle(fontSize: 10)),
                     ),
                 ],
               ),
@@ -371,7 +418,48 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF10B981), width: 2)),
                   focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF10B981), width: 2)),
                 ),
+                onChanged: _onAmountChanged,
               ),
+              if (openOrders.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text('APPLY TO ORDERS (FIFO — oldest first)', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                const SizedBox(height: 6),
+                for (final o in openOrders)
+                  _OrderAllocationRow(
+                    order: o,
+                    checked: _selectedOrderIds.contains(o.id),
+                    onToggle: () => _toggleOrder(o.id),
+                    applied: allocatedByOrder[o.id]?.amount,
+                  ),
+                if (unallocated > 0.01) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(10)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Unallocated (becomes credit)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                        Text(formatINR(unallocated), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Color(0xFF1D4ED8))),
+                      ],
+                    ),
+                  ),
+                ],
+                if (tdsInThisPayment > 0) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(color: const Color(0xFFFFFBEB), borderRadius: BorderRadius.circular(10)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('TDS Settled on Closed Orders', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                        Text(formatINR(tdsInThisPayment), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Color(0xFFB45309))),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -416,8 +504,8 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const _FieldLabel('TDS Deducted (₹)'),
-                        TextField(controller: _tdsCtrl, keyboardType: TextInputType.number, decoration: _decoration(hint: '0')),
+                        const _FieldLabel('Other Deduction (₹)'),
+                        TextField(controller: _otherDeductionCtrl, keyboardType: TextInputType.number, decoration: _decoration(hint: '0')),
                       ],
                     ),
                   ),
@@ -457,21 +545,21 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
               ),
               const SizedBox(height: 10),
               const _FieldLabel('Payment Notes / Remarks'),
-              TextField(controller: _notesCtrl, decoration: _decoration(hint: 'e.g. 1st installment for 500 bags order')),
+              TextField(controller: _notesCtrl, decoration: _decoration(hint: 'e.g. Settlement for last 3 LRs')),
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(backgroundColor: const Color(0xFF059669), padding: const EdgeInsets.symmetric(vertical: 14)),
-                  onPressed: () => _handleSubmit(currentOrder),
+                  onPressed: () => _handleSubmit(openOrders),
                   icon: const Icon(Icons.check, size: 16),
-                  label: Text('Confirm & Record ${formatINR(double.tryParse(_amountCtrl.text) ?? 0)}'),
+                  label: Text('Confirm & Record ${formatINR(amountReceived)}'),
                 ),
               ),
             ],
           ),
         ),
-        if (orderPaymentHistory.isNotEmpty) ...[
+        if (partyHistory.isNotEmpty) ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(14),
@@ -483,11 +571,11 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                   children: [
                     Icon(Icons.history, size: 16, color: Color(0xFF64748B)),
                     SizedBox(width: 6),
-                    Text('PREVIOUS INSTALLMENTS FOR THIS ORDER', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    Text('PREVIOUS PAYMENTS FROM THIS PARTY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                   ],
                 ),
                 const SizedBox(height: 8),
-                for (final h in orderPaymentHistory)
+                for (final h in partyHistory)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Row(
@@ -497,10 +585,11 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(formatINR(h.amountReceived as double), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                              Text(formatINR(h.amountReceived), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                               Text(
-                                '${formatDate(h.paymentDate as String)} via ${(h.paymentMethod as PaymentMethod).jsonValue}'
-                                '${(h.referenceNumber as String).isNotEmpty ? ' • Ref: ${h.referenceNumber}' : ''}',
+                                '${formatDate(h.paymentDate)} via ${h.paymentMethod.jsonValue}'
+                                '${h.referenceNumber.isNotEmpty ? ' • Ref: ${h.referenceNumber}' : ''}'
+                                '${h.allocations.isNotEmpty ? ' • ${h.allocations.map((a) => a.orderNumber).join(', ')}' : ''}',
                                 style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                               ),
                             ],
@@ -509,13 +598,13 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(999)),
-                          child: Text(h.receiptNumber as String, style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF047857), fontWeight: FontWeight.bold)),
+                          child: Text(h.receiptNumber, style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF047857), fontWeight: FontWeight.bold)),
                         ),
                         IconButton(
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                           icon: const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF94A3B8)),
-                          onPressed: () => _handleEditPayment(h as PaymentReceipt),
+                          onPressed: () => _handleEditPayment(h),
                         ),
                       ],
                     ),
@@ -525,6 +614,53 @@ class _ReceivePaymentScreenState extends ConsumerState<ReceivePaymentScreen> {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _OrderAllocationRow extends StatelessWidget {
+  const _OrderAllocationRow({required this.order, required this.checked, required this.onToggle, required this.applied});
+
+  final Order order;
+  final bool checked;
+  final VoidCallback onToggle;
+  final double? applied;
+
+  @override
+  Widget build(BuildContext context) {
+    final due = expectedReceiptFor(order) - order.amountReceived;
+    final closed = applied != null && applied! >= due - 0.01;
+    return InkWell(
+      onTap: onToggle,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: checked ? const Color(0xFFF0FDF4) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: checked ? const Color(0xFFA7F3D0) : const Color(0xFFE2E8F0)),
+        ),
+        child: Row(
+          children: [
+            Checkbox(value: checked, onChanged: (_) => onToggle()),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('#${order.orderNumber} • ${formatDate(order.orderDate)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  Text('Due ${formatINR(due)}', style: const TextStyle(fontSize: 10, color: Color(0xFF64748B))),
+                ],
+              ),
+            ),
+            if (applied != null && applied! > 0)
+              Text(
+                '${formatINR(applied!)} ${closed ? '✓' : '(partial)'}',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: closed ? const Color(0xFF047857) : const Color(0xFFB45309)),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

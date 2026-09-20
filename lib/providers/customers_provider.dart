@@ -1,14 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/customer.dart';
-import '../models/enums.dart';
-import '../models/order.dart';
 import '../storage/hive_boxes.dart';
 import 'toast_provider.dart';
 
-/// Mirrors the customer-related logic in `LedgerContext.tsx`:
-/// `createOrder`'s customer side-effect (:506-522), `receivePayment`'s
-/// customer balance update (:647-659), and `saveCustomer` (:781-816).
+/// Mirrors `saveCustomer` in `LedgerContext.tsx:781-816`. Billing/outstanding
+/// totals are no longer stored here — they're derived from orders + payments
+/// by `partyLedgerProvider`, which is the single place the `billPayer` rule
+/// (which party an order's receivable belongs to) lives.
 class CustomersNotifier extends Notifier<List<Customer>> {
   @override
   List<Customer> build() => customersBox.values.toList();
@@ -20,42 +19,7 @@ class CustomersNotifier extends Notifier<List<Customer>> {
     state = next;
   }
 
-  /// Bumps trip/billing stats when a new order is created against this customer.
-  void applyOrderCreated(Order order) {
-    final isBillCustomer = order.billing.billPayer == PayerType.customer;
-    _commit([
-      for (final c in state)
-        if (c.id == order.customerId || c.name == order.customerName)
-          c.copyWith(
-            totalOrders: c.totalOrders + 1,
-            totalBagsReceived: c.totalBagsReceived + order.numberOfBags,
-            totalBilled: isBillCustomer ? c.totalBilled + order.charges.totalCustomerBill : null,
-            outstandingBalance:
-                isBillCustomer ? c.outstandingBalance + order.billing.netExpectedReceipt : null,
-          )
-        else
-          c,
-    ]);
-  }
-
-  /// Applies a received payment to the matching customer's balance.
-  void applyPaymentReceived(String payerName, double amountReceived) {
-    _commit([
-      for (final c in state)
-        if (c.name == payerName)
-          c.copyWith(
-            totalReceived: c.totalReceived + amountReceived,
-            outstandingBalance:
-                (c.outstandingBalance - amountReceived) < 0 ? 0 : c.outstandingBalance - amountReceived,
-          )
-        else
-          c,
-    ]);
-  }
-
   /// Add-or-edit by presence of [id], matching `saveCustomer` in `LedgerContext.tsx`.
-  /// Editing preserves the aggregate fields — those only change via
-  /// [applyOrderCreated]/[applyPaymentReceived].
   Customer saveCustomer({
     String? id,
     required String name,
@@ -66,6 +30,8 @@ class CustomersNotifier extends Notifier<List<Customer>> {
     required String city,
     String? gstin,
     String? pan,
+    bool tdsApplicable = false,
+    double tdsPercentage = 0,
   }) {
     if (id != null) {
       Customer? updated;
@@ -81,6 +47,8 @@ class CustomersNotifier extends Notifier<List<Customer>> {
               city: city,
               gstin: gstin,
               pan: pan,
+              tdsApplicable: tdsApplicable,
+              tdsPercentage: tdsPercentage,
             ))
           else
             c,
@@ -100,11 +68,8 @@ class CustomersNotifier extends Notifier<List<Customer>> {
       city: city,
       gstin: gstin ?? '',
       pan: pan ?? '',
-      totalOrders: 0,
-      totalBagsReceived: 0,
-      totalBilled: 0,
-      totalReceived: 0,
-      outstandingBalance: 0,
+      tdsApplicable: tdsApplicable,
+      tdsPercentage: tdsPercentage,
     );
     _commit([...state, newCustomer]);
     ref.read(toastProvider.notifier).show('Customer "${newCustomer.name}" added');

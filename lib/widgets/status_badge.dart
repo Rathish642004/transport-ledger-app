@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 /// as the raw display label (e.g. `order.orderStatus.jsonValue`) rather than
 /// a typed enum, since [type] alone doesn't disambiguate which of the three
 /// status enums applies, matching the original's loosely-typed prop.
-enum StatusBadgeType { order, payment, driver }
+enum StatusBadgeType { order, payment }
 
 enum StatusBadgeSize { sm, md }
 
@@ -42,17 +42,6 @@ class StatusBadge extends StatelessWidget {
             return const _BadgeSpec('Overdue', Icons.error_outline, Color(0xFFFFF1F2), Color(0xFFBE123C), Color(0xFFFECDD3));
           default:
             return const _BadgeSpec('Unpaid', Icons.error_outline, Color(0xFFF1F5F9), Color(0xFF334155), Color(0xFFCBD5E1));
-        }
-      case StatusBadgeType.driver:
-        switch (status) {
-          case 'Paid in Full':
-            return const _BadgeSpec('Full Paid', Icons.check_circle, Color(0xFFECFDF5), Color(0xFF047857), Color(0xFFA7F3D0));
-          case 'Advance Paid':
-            return const _BadgeSpec('Adv. Paid', Icons.currency_rupee, Color(0xFFEFF6FF), Color(0xFF1D4ED8), Color(0xFFBFDBFE));
-          case 'Partially Paid':
-            return const _BadgeSpec('Part Paid', Icons.access_time, Color(0xFFFFFBEB), Color(0xFFB45309), Color(0xFFFDE68A));
-          default:
-            return const _BadgeSpec('Pending', null, Color(0xFFF1F5F9), Color(0xFF475569), Color(0xFFE2E8F0));
         }
       case StatusBadgeType.order:
         switch (status) {

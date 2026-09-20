@@ -30,6 +30,8 @@ class _AddEditCompanyScreenState extends ConsumerState<AddEditCompanyScreen> {
   late final TextEditingController _addressCtrl;
   late final TextEditingController _cityCtrl;
   late final TextEditingController _gstinCtrl;
+  late bool _tdsApplicable;
+  late final TextEditingController _tdsPercentageCtrl;
 
   Company? get _existing {
     if (widget.companyId == null) return null;
@@ -50,6 +52,8 @@ class _AddEditCompanyScreenState extends ConsumerState<AddEditCompanyScreen> {
     _addressCtrl = TextEditingController(text: existing?.address ?? '');
     _cityCtrl = TextEditingController(text: existing?.city ?? '');
     _gstinCtrl = TextEditingController(text: existing?.gstin ?? '');
+    _tdsApplicable = existing?.hasTds ?? false;
+    _tdsPercentageCtrl = TextEditingController(text: '${existing?.effectiveTdsPercentage ?? 2}');
   }
 
   @override
@@ -61,6 +65,7 @@ class _AddEditCompanyScreenState extends ConsumerState<AddEditCompanyScreen> {
     _addressCtrl.dispose();
     _cityCtrl.dispose();
     _gstinCtrl.dispose();
+    _tdsPercentageCtrl.dispose();
     super.dispose();
   }
 
@@ -79,6 +84,8 @@ class _AddEditCompanyScreenState extends ConsumerState<AddEditCompanyScreen> {
           address: _addressCtrl.text,
           city: _cityCtrl.text,
           gstin: _gstinCtrl.text.toUpperCase(),
+          tdsApplicable: _tdsApplicable,
+          tdsPercentage: double.tryParse(_tdsPercentageCtrl.text) ?? 0,
         );
 
     context.pop();
@@ -159,6 +166,32 @@ class _AddEditCompanyScreenState extends ConsumerState<AddEditCompanyScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFE2E8F0))),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Switch(value: _tdsApplicable, onChanged: (v) => setState(() => _tdsApplicable = v)),
+                        const SizedBox(width: 4),
+                        const Text('TDS Applicable', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                    if (_tdsApplicable) ...[
+                      const SizedBox(height: 4),
+                      const _FieldLabel('TDS Percentage (%)'),
+                      TextField(
+                        controller: _tdsPercentageCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: _decoration(hint: '2'),
+                      ),
+                    ],
+                  ],
+                ),
               ),
               const SizedBox(height: 14),
               SizedBox(

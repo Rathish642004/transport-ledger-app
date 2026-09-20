@@ -44,8 +44,12 @@ void main() {
     expect(find.text('FASHION PROCESS MILL'), findsOneWidget);
     expect(find.text('SRI MURUGAN TEXTILES & SIZING'), findsOneWidget);
     expect(find.text('RAJALAKSHMI WEAVING MILLS'), findsOneWidget);
-    expect(find.text('₹6,000'), findsOneWidget);
-    expect(find.text('5 Orders • 320 Bags Received'), findsOneWidget);
+    // Every seed order is billed to the Company, not the Customer, so each
+    // customer's receivable ledger is empty — this is the fix for the bug
+    // where a customer-billed order's receivable used to double-count onto
+    // the company too; here it correctly shows nothing is owed by customers.
+    expect(find.text('₹0'), findsNWidgets(4));
+    expect(find.text('0 Orders • 0 Bags Received'), findsNWidgets(4));
   });
 
   testWidgets('search filters by city', (tester) async {

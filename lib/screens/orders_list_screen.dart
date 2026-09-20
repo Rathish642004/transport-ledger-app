@@ -96,7 +96,6 @@ class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
             o.companyName.toLowerCase().contains(q) ||
             o.customerName.toLowerCase().contains(q) ||
             o.vehicleNumber.toLowerCase().contains(q) ||
-            o.driverName.toLowerCase().contains(q) ||
             o.pickupLocation.toLowerCase().contains(q) ||
             o.deliveryLocation.toLowerCase().contains(q) ||
             o.bagType.toLowerCase().contains(q);
@@ -388,16 +387,10 @@ class _OrderCard extends ConsumerWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
-                      child: Text(order.vehicleNumber, style: const TextStyle(fontSize: 9, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(order.driverName, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                  ],
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
+                  child: Text(order.vehicleNumber, style: const TextStyle(fontSize: 9, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
                 ),
                 Text(
                   pendingReceivable > 0 ? 'Due: ${formatINR(pendingReceivable)}' : 'Paid in Full',

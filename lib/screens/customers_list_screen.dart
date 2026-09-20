@@ -4,7 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/customer.dart';
+import '../models/enums.dart';
+import '../models/party_ledger.dart';
 import '../providers/customers_provider.dart';
+import '../providers/party_ledger_provider.dart';
 import '../router/app_router.dart';
 import '../utils/formatters.dart';
 
@@ -71,7 +74,7 @@ class _CustomersListScreenState extends ConsumerState<CustomersListScreen> {
         ),
         const SizedBox(height: 10),
         for (final cust in filtered) ...[
-          _CustomerCard(customer: cust),
+          _CustomerCard(customer: cust, ledger: ledgerFor(ref.watch(partyLedgerProvider), PayerType.customer, cust.id)),
           const SizedBox(height: 10),
         ],
       ],
@@ -80,9 +83,10 @@ class _CustomersListScreenState extends ConsumerState<CustomersListScreen> {
 }
 
 class _CustomerCard extends StatelessWidget {
-  const _CustomerCard({required this.customer});
+  const _CustomerCard({required this.customer, required this.ledger});
 
   final Customer customer;
+  final PartyLedger ledger;
 
   @override
   Widget build(BuildContext context) {
@@ -109,11 +113,11 @@ class _CustomerCard extends StatelessWidget {
                 children: [
                   const Text('DUE BALANCE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8))),
                   Text(
-                    formatINR(customer.outstandingBalance),
+                    formatINR(ledger.outstanding),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w900,
-                      color: customer.outstandingBalance > 0 ? const Color(0xFFBE123C) : const Color(0xFF047857),
+                      color: ledger.outstanding > 0 ? const Color(0xFFBE123C) : const Color(0xFF047857),
                     ),
                   ),
                 ],
@@ -134,7 +138,7 @@ class _CustomerCard extends StatelessWidget {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          '${customer.totalOrders} Orders • ${customer.totalBagsReceived} Bags Received',
+                          '${ledger.orderCount} Orders • ${ledger.totalBags} Bags Received',
                           style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
                           overflow: TextOverflow.ellipsis,
                         ),

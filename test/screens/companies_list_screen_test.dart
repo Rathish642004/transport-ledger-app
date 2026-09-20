@@ -44,8 +44,11 @@ void main() {
     expect(find.text('SRI SHANMUGAVEL MILLS PRIVATE LIMITED'), findsOneWidget);
     expect(find.text('SOUNDARARAJA MILLS LIMITED'), findsOneWidget);
     expect(find.text('PREMIER SPG & WVG MILLS'), findsOneWidget);
-    expect(find.text('₹5,500'), findsOneWidget);
-    expect(find.text('6 Orders • 380 Bags Dispatched'), findsOneWidget);
+    // Derived live from seed orders (companyId comp-1, billPayer Company):
+    // ord-kst-161 (6000, paid) + ord-kst-162 (5500, unpaid) + ord-kst-163
+    // (6000, unpaid) = 17500 billed, 6000 received, 11500 outstanding.
+    expect(find.text('₹11,500'), findsOneWidget);
+    expect(find.text('3 Orders • 175 Bags Dispatched'), findsOneWidget);
   });
 
   testWidgets('search filters by name', (tester) async {
